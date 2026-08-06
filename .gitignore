@@ -34,6 +34,9 @@
 **/cmake-build-debug/
 **/cmake-build-release/
 
+# Prebuilt/vendored framework binaries
+lib/
+
 # Source Code
 *.ilk
 *.pdb
@@ -51,9 +54,10 @@
 # Build helpers and results:
 **/obj/
 
-# Visual Studio
+# Visual Studio & Code
 .vs/**
 !.vs/launch.vs.json
+.vscode/**
 
 # CLion
 **/.idea

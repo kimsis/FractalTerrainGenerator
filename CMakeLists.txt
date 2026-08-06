@@ -34,16 +34,39 @@ endif()
 add_subdirectory(VulkanLaunchpad)
 
 #================================#
+# GCG Framework (prebuilt lib)   #
+#================================#
+if(WIN32)
+    set(GCG_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/windows")
+    set(GCG_LIB_DEBUG "${GCG_LIB_DIR}/GCG_VK_Lib_Debug.lib")
+    set(GCG_LIB_RELEASE "${GCG_LIB_DIR}/GCG_VK_Lib_Release.lib")
+elseif(APPLE)
+    set(GCG_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/macos")
+    set(GCG_LIB_DEBUG "${GCG_LIB_DIR}/libGCG_VK_Lib_Debug.a")
+    set(GCG_LIB_RELEASE "${GCG_LIB_DIR}/libGCG_VK_Lib_Release.a")
+else()
+    set(GCG_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/linux")
+    set(GCG_LIB_DEBUG "${GCG_LIB_DIR}/libGCG_VK_Lib_Debug.a")
+    set(GCG_LIB_RELEASE "${GCG_LIB_DIR}/libGCG_VK_Lib_Release.a")
+endif()
+
+#================================#
 # VulkanLaunchpadStarter         #
 #================================#
-add_executable(${PROJECT_NAME} 
-    src/Main.cpp 
+add_executable(${PROJECT_NAME}
+    src/Main.cpp
     src/VulkanHelpers.h
-    src/VulkanHelpers.cpp 
-    src/Teapot.h 
-    src/Teapot.cpp 
+    src/VulkanHelpers.cpp
+    src/Geometry.h
+    src/Geometry.cpp
+    src/Utils.h
+    src/Camera.h
 )
-target_link_libraries(${PROJECT_NAME} PRIVATE VulkanLaunchpad)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    VulkanLaunchpad
+    $<$<CONFIG:Debug>:${GCG_LIB_DEBUG}>
+    $<$<NOT:$<CONFIG:Debug>>:${GCG_LIB_RELEASE}>
+)
 add_dependencies(${PROJECT_NAME} VulkanLaunchpad)
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin LIBRARY DESTINATION lib ARCHIVE DESTINATION lib)
 
