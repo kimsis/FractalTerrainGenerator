@@ -1,0 +1,20 @@
+---
+BasedOnStyle: Google
+Language: Cpp
+
+IndentWidth: 4
+ColumnLimit: 150
+PointerAlignment: Left
+BreakBeforeBraces: Attach
+
+# Trailing commas, never leading commas, in braced init lists.
+Cpp11BracedListStyle: true
+
+# When a call/struct-init doesn't fit on one line, put exactly one
+# argument/member per line instead of packing several per line.
+BinPackArguments: false
+BinPackParameters: false
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AlignAfterOpenBracket: BlockIndent
+...
