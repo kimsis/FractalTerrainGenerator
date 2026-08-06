@@ -7,7 +7,6 @@
  */
 #pragma once
 
-
 #include <memory>
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -20,7 +19,7 @@
  * Arc ball camera, modified by mouse input
  */
 class Camera {
-  public:
+   public:
     /*!
      * Camera constructor
      * @param	projection_matrix		The projection matrix to be used for this camera
@@ -59,7 +58,7 @@ class Camera {
      */
     void update(double x, double y, float zoom, bool dragging, bool strafing);
 
-  protected:
+   protected:
     glm::mat4 _viewMatrix;
     glm::mat4 _projMatrix;
     double _mouseX, _mouseY;

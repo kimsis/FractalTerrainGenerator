@@ -7,6 +7,9 @@ ColumnLimit: 150
 PointerAlignment: Left
 BreakBeforeBraces: Attach
 
+# Google's default is 2; keep the more common 1-space gap before trailing comments.
+SpacesBeforeTrailingComments: 1
+
 # Trailing commas, never leading commas, in braced init lists.
 Cpp11BracedListStyle: true
 

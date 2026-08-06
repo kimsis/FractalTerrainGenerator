@@ -26,7 +26,7 @@ bool gcgInitFramework(
     VkPhysicalDevice vk_physical_device,
     VkDevice vk_device,
     VkQueue vk_queue,
-    const VklSwapchainConfig &swapchain_config
+    const VklSwapchainConfig& swapchain_config
 );
 
 /*!
@@ -122,8 +122,7 @@ void gcgSaveScreenshot(
     uint32_t queue_family_index
 );
 
-struct CMDLineArgs
-{
+struct CMDLineArgs {
     bool run_headless = false;
     bool init_camera = false;
     bool init_renderer = false;
@@ -135,4 +134,3 @@ struct CMDLineArgs
 };
 
 void gcgParseArgs(CMDLineArgs& args, int argc, char** argv);
-

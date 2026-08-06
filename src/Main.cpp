@@ -5,17 +5,16 @@
  * Original version created by Lukas Gersthofer and Bernhard Steiner.
  * Vulkan edition created by Johannes Unterguggenberger (junt@cg.tuwien.ac.at).
  */
-#include "PathUtils.h"
-#include "Utils.h"
-
 #include <vulkan/vulkan.h>
 
-#include <vector>
 #include <array>
-
 #include <sstream>
+#include <vector>
+
 #include "Camera.h"
 #include "Geometry.h"
+#include "PathUtils.h"
+#include "Utils.h"
 
 #undef min
 #undef max
@@ -27,11 +26,9 @@ constexpr float BACKGROUND_R = 0.14f;
 constexpr float BACKGROUND_G = 0.4f;
 constexpr float BACKGROUND_B = 0.37f;
 
-
 constexpr float CORNELL_WIDTH = 3.0f;
 constexpr float CORNELL_HEIGHT = 3.0f;
 constexpr float CORNELL_DEPTH = 3.0f;
-
 
 constexpr uint32_t CYLINDER_SEGMENTS = 20;
 constexpr float CYLINDER_HEIGHT = 1.6f;
@@ -54,7 +51,6 @@ constexpr glm::vec3 CYLINDER_POSITION = glm::vec3(0.6f, 0.3f, 0.0f);
 constexpr glm::vec3 BEZIER_POSITION = glm::vec3(-0.6f, 0.0f, 0.0f);
 constexpr glm::vec3 SPHERE_POSITION = glm::vec3(0.6f, -0.9f, 0.0f);
 
-
 constexpr glm::vec4 DIRLIGHT_COLOR = glm::vec4(0.85f, 0.85f, 0.85f, 0.0f);
 constexpr glm::vec4 DIRLIGHT_DIR = glm::vec4(0.0f, 1.0f, -1.0f, 0.0f);
 constexpr glm::vec4 POINTLIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
@@ -65,7 +61,6 @@ constexpr float CORNELL_KA = 0.1f;
 constexpr float CORNELL_KD = 0.9f;
 constexpr float CORNELL_KS = 0.3f;
 constexpr float CORNELL_ALPHA = 10.0f;
-
 
 constexpr float BOX_KA = 0.1f;
 constexpr float BOX_KD = 0.7f;
@@ -200,7 +195,6 @@ struct UniformBuffer {
     /*! A color values, stored as four floats, to properly align to 16 byte boundaries. */
     glm::vec4 color;
 
-
     /*! Storage for the model matrix, consisting of 16 float values (inherently aligned to 16 bytes) */
     glm::mat4 modelMatrix;
 
@@ -276,7 +270,13 @@ void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffe
  *	@param	directional_light_data	A descriptor for this uniform buffer will be written to binding = 1
  *	@param	point_light_data		A descriptor for this uniform buffer will be written to binding = 2
  */
-void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer object_data, VkBuffer directional_light_data, VkBuffer point_light_data);
+void writeDescriptorSet(
+    VkDevice device,
+    VkDescriptorSet descriptor_set,
+    VkBuffer object_data,
+    VkBuffer directional_light_data,
+    VkBuffer point_light_data
+);
 
 /*!
  *	Writes the descriptor information to a given descriptor set which describes one uniform buffer at binding = 0,
@@ -291,8 +291,15 @@ void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffe
  *	@param	image_view				A combined descriptor together with sampler will be written to binding = 3
  *	@param	sampler					A combined descriptor together with image_view will be written to binding = 3
  */
-void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer object_data, VkBuffer directional_light_data, VkBuffer point_light_data,
-    VkImageView image_view, VkSampler sampler);
+void writeDescriptorSet(
+    VkDevice device,
+    VkDescriptorSet descriptor_set,
+    VkBuffer object_data,
+    VkBuffer directional_light_data,
+    VkBuffer point_light_data,
+    VkImageView image_view,
+    VkSampler sampler
+);
 
 /*!
  *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
@@ -433,7 +440,6 @@ static bool g_synchronization2_supported = false;
  */
 PFN_vkCmdPipelineBarrier2KHR g_vkCmdPipelineBarrier2KHR;
 
-
 /* ------------------------------------------------ */
 // Main
 /* ------------------------------------------------ */
@@ -504,7 +510,7 @@ int main(int argc, char** argv) {
         monitor = glfwGetPrimaryMonitor();
     }
 
-	// Set some window settings before creating the window:
+    // Set some window settings before creating the window:
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // No need to create a graphics context for Vulkan
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
@@ -536,7 +542,7 @@ int main(int argc, char** argv) {
     application_info.engineVersion = VK_MAKE_API_VERSION(0, 2023, 9, 1);
     application_info.pApplicationName = "GCG_VK_Solution";
     application_info.applicationVersion = VK_MAKE_API_VERSION(0, 2023, 9, 19);
-    application_info.apiVersion = VK_API_VERSION_1_1;            // Your system needs to support this Vulkan API version.
+    application_info.apiVersion = VK_API_VERSION_1_1; // Your system needs to support this Vulkan API version.
 
     VkInstanceCreateInfo instance_create_info = {};                      // Zero-initialize every member
     instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO; // Set the struct's type
@@ -730,7 +736,13 @@ int main(int argc, char** argv) {
     // Subtask 2.7: Depth Test
     /* --------------------------------------------- */
     VkImage depth_buffer = vklCreateDeviceLocalImageWithBackingMemory(
-        vk_physical_device, vk_device, window_width, window_height, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+        vk_physical_device,
+        vk_device,
+        window_width,
+        window_height,
+        VK_FORMAT_D32_SFLOAT,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+    );
 
     VkClearValue depth_clear_value;
     depth_clear_value.depthStencil.depth = 1.0f;
@@ -824,8 +836,17 @@ int main(int argc, char** argv) {
             if (cmdline_args.set_filename) {
                 screenshot_filename = cmdline_args.filename;
             }
-            gcgSaveScreenshot(screenshot_filename, swapchain_image_handles[idx], window_width, window_height, surface_format.format, vk_device, vk_physical_device,
-                vk_queue, selected_queue_family_index);
+            gcgSaveScreenshot(
+                screenshot_filename,
+                swapchain_image_handles[idx],
+                window_width,
+                window_height,
+                surface_format.format,
+                vk_device,
+                vk_physical_device,
+                vk_queue,
+                selected_queue_family_index
+            );
             break;
         }
     }
@@ -858,8 +879,7 @@ int main(int argc, char** argv) {
 void errorCallbackFromGlfw(int error, const char* description) { std::cout << "GLFW error " << error << ": " << description << std::endl; }
 
 void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int action, int mods) {
-    if (action != GLFW_RELEASE)
-        return;
+    if (action != GLFW_RELEASE) return;
     if (key == GLFW_KEY_ESCAPE) {
         glfwSetWindowShouldClose(glfw_window, true);
     }
@@ -951,7 +971,6 @@ void mouseButtonCallbackFromGlfw(GLFWwindow* glfw_window, int button, int action
  *	mouse scroll input that can be processed by our application.
  */
 void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoffset) { g_zoom -= static_cast<float>(yoffset) * 0.5f; }
-
 
 void addInstanceExtensionToVectorIfSupported(const char* extension_name, std::vector<const char*>& ref_vector) {
     VkResult result;
@@ -1103,7 +1122,6 @@ VkSurfaceTransformFlagBitsKHR getSurfaceTransform(VkPhysicalDevice physical_devi
     return getPhysicalDeviceSurfaceCapabilities(physical_device, surface).currentTransform;
 }
 
-
 VkDescriptorSet allocDescriptorSet(VkDevice device, VkDescriptorPool descriptor_pool, VkDescriptorSetLayout descriptor_set_layout) {
     VkResult result;
 
@@ -1144,7 +1162,13 @@ void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffe
     vkUpdateDescriptorSets(device, 1u, &write_descriptor_set, 0u, nullptr);
 }
 
-void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer object_data, VkBuffer directional_light_data, VkBuffer point_light_data) {
+void writeDescriptorSet(
+    VkDevice device,
+    VkDescriptorSet descriptor_set,
+    VkBuffer object_data,
+    VkBuffer directional_light_data,
+    VkBuffer point_light_data
+) {
     // Write object data descriptor first:
     writeDescriptorSet(device, descriptor_set, object_data);
 
@@ -1163,20 +1187,43 @@ void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffe
     pointlight_buffer_info.range = VK_WHOLE_SIZE;
 
     std::vector<VkWriteDescriptorSet> writes = {
-        VkWriteDescriptorSet{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptor_set,
-            /* dstBinding: */ 1u, 0u, 1u,
-            /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr,
-            /* pBufferInfo: */ &dirlight_buffer_info, nullptr},
-        VkWriteDescriptorSet{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptor_set,
-            /* dstBinding: */ 2u, 0u, 1u,
-            /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, nullptr,
-            /* pBufferInfo: */ &pointlight_buffer_info, nullptr},
+        VkWriteDescriptorSet{
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            nullptr,
+            descriptor_set,
+            /* dstBinding: */ 1u,
+            0u,
+            1u,
+            /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            nullptr,
+            /* pBufferInfo: */ &dirlight_buffer_info,
+            nullptr
+        },
+        VkWriteDescriptorSet{
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            nullptr,
+            descriptor_set,
+            /* dstBinding: */ 2u,
+            0u,
+            1u,
+            /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            nullptr,
+            /* pBufferInfo: */ &pointlight_buffer_info,
+            nullptr
+        },
     };
 
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
 }
-void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer object_data, VkBuffer directional_light_data, VkBuffer point_light_data,
-    VkImageView image_view, VkSampler sampler) {
+void writeDescriptorSet(
+    VkDevice device,
+    VkDescriptorSet descriptor_set,
+    VkBuffer object_data,
+    VkBuffer directional_light_data,
+    VkBuffer point_light_data,
+    VkImageView image_view,
+    VkSampler sampler
+) {
     // Write object data, and light source dat first:
     writeDescriptorSet(device, descriptor_set, object_data, directional_light_data, point_light_data);
 
@@ -1191,10 +1238,18 @@ void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffe
     /* --------------------------------------------- */
     // Subtask 5.8: Use the Textures in Shaders
     /* --------------------------------------------- */
-    std::vector<VkWriteDescriptorSet> writes = {VkWriteDescriptorSet{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, descriptor_set,
-        /* dstBinding: */ 3u, 0u, 1u,
+    std::vector<VkWriteDescriptorSet> writes = {VkWriteDescriptorSet{
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        nullptr,
+        descriptor_set,
+        /* dstBinding: */ 3u,
+        0u,
+        1u,
         /* descriptorType: */ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        /* pImageInfo: */ &texture_info, nullptr, nullptr}};
+        /* pImageInfo: */ &texture_info,
+        nullptr,
+        nullptr
+    }};
 
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
 }
@@ -1226,8 +1281,6 @@ void drawGeometryWithMaterial(VkPipeline pipeline, const Geometry& geometry, VkD
     vkCmdBindIndexBuffer(cb, geometry.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cb, geometry.numberOfIndices, num_instances, 0u, 0u, 0u);
 }
-
-
 
 VkImageView createImageViewForImage(VkDevice device, VkImage image, VkImageViewType view_type, VkFormat format) {
     /* --------------------------------------------- */
@@ -1268,8 +1321,14 @@ ImageAndView loadImage(VkDevice device, VkQueue queue, VkCommandPool command_poo
     VkResult result;
 
     // 0. Create the image:
-    VkImage image = vklCreateDeviceLocalImageWithBackingMemory(image_info.extent.width, image_info.extent.height, image_info.imageFormat,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, image_layers, image_flags);
+    VkImage image = vklCreateDeviceLocalImageWithBackingMemory(
+        image_info.extent.width,
+        image_info.extent.height,
+        image_info.imageFormat,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        image_layers,
+        image_flags
+    );
 
     // 1. Create a command buffer and start recording
     VkCommandBufferAllocateInfo command_buffer_allocate_info = {};
@@ -1320,9 +1379,11 @@ ImageAndView loadImage(VkDevice device, VkQueue queue, VkCommandPool command_poo
             image_info = vklGetDdsImageLevelInfo(image_file_paths[layer].c_str(), level);
             // Sanity check to see we are loading an image with the correct size
             if (mipWidth != image_info.extent.width || mipHeight != image_info.extent.height)
-                VKL_EXIT_WITH_ERROR("vklGetDdsImageLevelInfo for level " + std::to_string(level) +
-                    " returned an image with width=" + std::to_string(image_info.extent.width) + ", height=" + std::to_string(image_info.extent.height) +
-                    " instead of the expected width=" + std::to_string(mipWidth) + ", height=" + std::to_string(mipHeight) + ".");
+                VKL_EXIT_WITH_ERROR(
+                    "vklGetDdsImageLevelInfo for level " + std::to_string(level) + " returned an image with width=" +
+                    std::to_string(image_info.extent.width) + ", height=" + std::to_string(image_info.extent.height) +
+                    " instead of the expected width=" + std::to_string(mipWidth) + ", height=" + std::to_string(mipHeight) + "."
+                );
             mipWidth = mipWidth > 1u ? mipWidth / 2u : 1u;
             mipHeight = mipHeight > 1u ? mipHeight / 2u : 1u;
             // Store in vector to keep alive until they are no longer needed, which is after the fence has been signaled:
@@ -1330,11 +1391,11 @@ ImageAndView loadImage(VkDevice device, VkQueue queue, VkCommandPool command_poo
 
             if (g_synchronization2_supported) {
                 // 2. Record an image layout transition into a format that is optimal for the image to get data copied into it:
-                image_memory_barrier2.srcStageMask = VK_PIPELINE_STAGE_2_NONE_KHR;       // No need to wait on anything
-                image_memory_barrier2.srcAccessMask = VK_ACCESS_2_NONE_KHR;              // Nothing required thanks to implicit memory guaranteed with host writes
-                image_memory_barrier2.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT_KHR;   // The subsequent command (which must wait) is a COPY command.
-                image_memory_barrier2.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT_KHR; // Copy reads from the buffer. The layout transition must be available
-                                                                                         // to that type of access.
+                image_memory_barrier2.srcStageMask = VK_PIPELINE_STAGE_2_NONE_KHR; // No need to wait on anything
+                image_memory_barrier2.srcAccessMask = VK_ACCESS_2_NONE_KHR; // Nothing required thanks to implicit memory guaranteed with host writes
+                image_memory_barrier2.dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT_KHR; // The subsequent command (which must wait) is a COPY command.
+                image_memory_barrier2.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT_KHR; // Copy reads from the buffer. The layout transition must be
+                                                                                         // available to that type of access.
                 image_memory_barrier2.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
                 image_memory_barrier2.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
                 image_memory_barrier2.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -1354,11 +1415,18 @@ ImageAndView loadImage(VkDevice device, VkQueue queue, VkCommandPool command_poo
                 image_memory_barrier.subresourceRange.levelCount = 1u;
                 image_memory_barrier.subresourceRange.baseArrayLayer = layer;
                 image_memory_barrier.subresourceRange.layerCount = 1u;
-                vkCmdPipelineBarrier(command_buffer, 
-                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, /* --> */ VK_PIPELINE_STAGE_TRANSFER_BIT, {},
-                    /* Memory barriers:        */ 0u, nullptr,
-                    /* Buffer memory barriers: */ 0u, nullptr,
-                    /* Image memory barriers:  */ 1u, &image_memory_barrier);
+                vkCmdPipelineBarrier(
+                    command_buffer,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    /* --> */ VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    {},
+                    /* Memory barriers:        */ 0u,
+                    nullptr,
+                    /* Buffer memory barriers: */ 0u,
+                    nullptr,
+                    /* Image memory barriers:  */ 1u,
+                    &image_memory_barrier
+                );
             }
 
             // 3. Record copying data from the (host-coherent) buffer into the (device-local) image:
@@ -1381,13 +1449,15 @@ ImageAndView loadImage(VkDevice device, VkQueue queue, VkCommandPool command_poo
             if (g_synchronization2_supported) {
                 // 4. Record an image layout transition into a format that is optimal for rendering:
                 // Re-use the VkImageMemoryBarrier from above, but modify a few parameters:
-                image_memory_barrier2.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT_KHR;    // It is the preceding COPY which must have completed before moving on.
+                image_memory_barrier2.srcStageMask =
+                    VK_PIPELINE_STAGE_2_COPY_BIT_KHR; // It is the preceding COPY which must have completed before moving on.
                 image_memory_barrier2.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT_KHR; // The writes of that COPY must have completed.
                 image_memory_barrier2.dstStageMask =
                     VK_PIPELINE_STAGE_2_NONE_KHR; // No dst stage required in the barrier, because afterwards we sync with the fence.
                 image_memory_barrier2.dstAccessMask = VK_ACCESS_2_NONE_KHR;
                 image_memory_barrier2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-                image_memory_barrier2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // Transform into right format for being sampled from in shaders.
+                image_memory_barrier2.newLayout =
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // Transform into right format for being sampled from in shaders.
                 g_vkCmdPipelineBarrier2KHR(command_buffer, &dependency_info);
             } else { // => Synchronization2 is NOT supported => use oldschool style:
                 // 4. Record an image layout transition into a format that is optimal for rendering:
@@ -1397,11 +1467,18 @@ ImageAndView loadImage(VkDevice device, VkQueue queue, VkCommandPool command_poo
                 image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
                 image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-                vkCmdPipelineBarrier(command_buffer, 
-                    VK_PIPELINE_STAGE_TRANSFER_BIT, /* --> */ VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, {},
-                    /* Memory barriers:        */ 0u, nullptr,
-                    /* Buffer memory barriers: */ 0u, nullptr,
-                    /* Image memory barriers:  */ 1u, &image_memory_barrier);
+                vkCmdPipelineBarrier(
+                    command_buffer,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    /* --> */ VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                    {},
+                    /* Memory barriers:        */ 0u,
+                    nullptr,
+                    /* Buffer memory barriers: */ 0u,
+                    nullptr,
+                    /* Image memory barriers:  */ 1u,
+                    &image_memory_barrier
+                );
             }
         }
     }
@@ -1436,7 +1513,8 @@ ImageAndView loadImage(VkDevice device, VkQueue queue, VkCommandPool command_poo
     }
 
     return ImageAndView{
-        image, createImageViewForImage(device, image, image_layers == 6 ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D, image_info.imageFormat)
+        image,
+        createImageViewForImage(device, image, image_layers == 6 ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D, image_info.imageFormat)
     };
 }
 
@@ -1578,14 +1656,16 @@ DemoScene setupDemoScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected
     // Create buffers for the light sources
     VkDeviceSize num_dirlights = 1;
     scene.ub_dirlight = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(DirectionalLight) * num_dirlights, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+        sizeof(DirectionalLight) * num_dirlights,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
     );
     DirectionalLight directional_light = {DIRLIGHT_COLOR, glm::normalize(DIRLIGHT_DIR)};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_dirlight, &directional_light, sizeof(DirectionalLight));
 
     VkDeviceSize num_pointlights = 1;
     scene.ub_pointlight = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(PointLight) * num_pointlights, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+        sizeof(PointLight) * num_pointlights,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
     );
     PointLight point_light = {POINTLIGHT_COLOR, POINTLIGHT_POS, POINTLIGHT_ATTENUATION};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_pointlight, &point_light, sizeof(PointLight));
@@ -1617,29 +1697,33 @@ DemoScene setupDemoScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected
     result = vkCreateSampler(vk_device, &sampler_create_info, nullptr, &scene.sampler);
     VKL_CHECK_VULKAN_RESULT(result);
 
-
     // cornell box geometry and material
     scene.cornell_geometry = createAndUploadIntoGpuMemory(createCornellBoxGeometry(CORNELL_WIDTH, CORNELL_HEIGHT, CORNELL_DEPTH));
-    scene.ub_cornell = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-    );
+    scene.ub_cornell =
+        vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     scene.ds_cornell = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
     writeDescriptorSet(vk_device, scene.ds_cornell, scene.ub_cornell, scene.ub_dirlight, scene.ub_pointlight);
 
     // Box geometry and material:
     scene.box_geometry = createAndUploadIntoGpuMemory(createBoxGeometry(BOX_WIDTH, BOX_HEIGHT, BOX_DEPTH));
-    scene.ub_box = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-    );
+    scene.ub_box =
+        vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     scene.ds_box = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
     writeDescriptorSet(vk_device, scene.ds_box, scene.ub_box, scene.ub_dirlight, scene.ub_pointlight, scene.wood_texture.view, scene.sampler);
     // Cylinder Material:
     scene.cylinder_geometry = createAndUploadIntoGpuMemory(createCylinderGeometry(CYLINDER_SEGMENTS, CYLINDER_HEIGHT, CYLINDER_RADIUS));
-    scene.ub_cylinder = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-    );
+    scene.ub_cylinder =
+        vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     scene.ds_cylinder = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
-    writeDescriptorSet(vk_device, scene.ds_cylinder, scene.ub_cylinder, scene.ub_dirlight, scene.ub_pointlight, scene.wood_texture.view, scene.sampler);
+    writeDescriptorSet(
+        vk_device,
+        scene.ds_cylinder,
+        scene.ub_cylinder,
+        scene.ub_dirlight,
+        scene.ub_pointlight,
+        scene.wood_texture.view,
+        scene.sampler
+    );
     // Cylinder Bezier Material:
     std::vector<glm::vec3> controlPoints = {
         glm::vec3(-0.3f, 0.6f, 0.0f),
@@ -1648,18 +1732,25 @@ DemoScene setupDemoScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected
         glm::vec3(0.0f, 0.3f, 0.0f),
         glm::vec3(0.0f, -0.5f, 0.0f),
     };
-    scene.bezier_cylinder_geometry = createAndUploadIntoGpuMemory(createBezierCylinderGeometry(BEZIER_CIRCULAR_SEGMENTS_N, controlPoints, BEZIER_SEGMENTS_S, BEZIER_RADIUS));
-    scene.ub_bezier_cylinder = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-    );
+    scene.bezier_cylinder_geometry =
+        createAndUploadIntoGpuMemory(createBezierCylinderGeometry(BEZIER_CIRCULAR_SEGMENTS_N, controlPoints, BEZIER_SEGMENTS_S, BEZIER_RADIUS));
+    scene.ub_bezier_cylinder =
+        vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     scene.ds_bezier_cylinder = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
-    writeDescriptorSet(vk_device, scene.ds_bezier_cylinder, scene.ub_bezier_cylinder, scene.ub_dirlight, scene.ub_pointlight, scene.tiles_diffuse.view, scene.sampler);
+    writeDescriptorSet(
+        vk_device,
+        scene.ds_bezier_cylinder,
+        scene.ub_bezier_cylinder,
+        scene.ub_dirlight,
+        scene.ub_pointlight,
+        scene.tiles_diffuse.view,
+        scene.sampler
+    );
 
     // Sphere Material:
     scene.sphere_geometry = createAndUploadIntoGpuMemory(createSphereGeometry(SPHERE_LON_SEG, SPHERE_LAT_SEG, SPHERE_RADIUS));
-    scene.ub_sphere = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-    );
+    scene.ub_sphere =
+        vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     scene.ds_sphere = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
     writeDescriptorSet(vk_device, scene.ds_sphere, scene.ub_sphere, scene.ub_dirlight, scene.ub_pointlight, scene.tiles_diffuse.view, scene.sampler);
 
@@ -1683,8 +1774,7 @@ void updateAndDrawDemoScene(DemoScene& scene, const Camera& camera) {
     ub_data.materialProperties = {CORNELL_KA, CORNELL_KD, CORNELL_KS, CORNELL_ALPHA};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_cornell, &ub_data, sizeof(UniformBuffer));
     // Update box:
-    ub_data.modelMatrix = glm::translate(glm::mat4{1.0f}, BOX_POSITION)
-                          * glm::rotate(glm::mat4{1.0f}, glm::radians(BOX_ROT_DEGREES), BOX_ROT_AXIS);
+    ub_data.modelMatrix = glm::translate(glm::mat4{1.0f}, BOX_POSITION) * glm::rotate(glm::mat4{1.0f}, glm::radians(BOX_ROT_DEGREES), BOX_ROT_AXIS);
     ub_data.modelMatrixForNormals = glm::transpose(glm::inverse(ub_data.modelMatrix));
     ub_data.materialProperties = {BOX_KA, BOX_KD, BOX_KS, BOX_ALPHA};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_box, &ub_data, sizeof(UniformBuffer));
@@ -1711,7 +1801,11 @@ void updateAndDrawDemoScene(DemoScene& scene, const Camera& camera) {
     drawGeometryWithMaterial(selected_cornell_pipeline, scene.cornell_geometry, scene.ds_cornell);
     drawGeometryWithMaterial(scene.custom_pipelines[g_polygon_mode_index][g_culling_index][0], scene.box_geometry, scene.ds_box);
     drawGeometryWithMaterial(scene.custom_pipelines[g_polygon_mode_index][g_culling_index][0], scene.cylinder_geometry, scene.ds_cylinder);
-    drawGeometryWithMaterial(scene.custom_pipelines[g_polygon_mode_index][g_culling_index][0], scene.bezier_cylinder_geometry, scene.ds_bezier_cylinder);
+    drawGeometryWithMaterial(
+        scene.custom_pipelines[g_polygon_mode_index][g_culling_index][0],
+        scene.bezier_cylinder_geometry,
+        scene.ds_bezier_cylinder
+    );
     drawGeometryWithMaterial(scene.custom_pipelines[g_polygon_mode_index][g_culling_index][0], scene.sphere_geometry, scene.ds_sphere);
 }
 

@@ -7,12 +7,13 @@
  */
 
 #include "Geometry.h"
-#include "Utils.h"
+
 #include <glm/gtc/constants.hpp>
+
+#include "Utils.h"
 
 #undef min
 #undef max
-
 
 constexpr float CORNELL_LEFT_R = 0.49f;
 constexpr float CORNELL_LEFT_G = 0.06f;
@@ -21,280 +22,263 @@ constexpr float CORNELL_RIGHT_R = 0.0f;
 constexpr float CORNELL_RIGHT_G = 0.13f;
 constexpr float CORNELL_RIGHT_B = 0.31f;
 
-GeometryData createBoxGeometry(float width, float height, float depth)
-{
-	GeometryData data;
+GeometryData createBoxGeometry(float width, float height, float depth) {
+    GeometryData data;
 
-	data.positions = {
-		// front
-		glm::vec3(-width / 2.0f, -height / 2.0f,  depth / 2.0f),
-		glm::vec3(width / 2.0f, -height / 2.0f,  depth / 2.0f),
-		glm::vec3(width / 2.0f, height / 2.0f,  depth / 2.0f),
-		glm::vec3(-width / 2.0f, height / 2.0f,  depth / 2.0f),
-		// back
-		glm::vec3(width / 2.0f, -height / 2.0f,  -depth / 2.0f),
-		glm::vec3(-width / 2.0f, -height / 2.0f,  -depth / 2.0f),
-		glm::vec3(-width / 2.0f, height / 2.0f,  -depth / 2.0f),
-		glm::vec3(width / 2.0f, height / 2.0f,  -depth / 2.0f),
-		// right
-		glm::vec3(width / 2.0f, -height / 2.0f,  depth / 2.0f),
-		glm::vec3(width / 2.0f, -height / 2.0f,  -depth / 2.0f),
-		glm::vec3(width / 2.0f, height / 2.0f,  -depth / 2.0f),
-		glm::vec3(width / 2.0f, height / 2.0f,  depth / 2.0f),
-		// left
-		glm::vec3(-width / 2.0f, -height / 2.0f,  -depth / 2.0f),
-		glm::vec3(-width / 2.0f, -height / 2.0f,  depth / 2.0f),
-		glm::vec3(-width / 2.0f, height / 2.0f,  depth / 2.0f),
-		glm::vec3(-width / 2.0f, height / 2.0f,  -depth / 2.0f),
-		// top
-		glm::vec3(-width / 2.0f, height / 2.0f,  -depth / 2.0f),
-		glm::vec3(-width / 2.0f, height / 2.0f,  depth / 2.0f),
-		glm::vec3(width / 2.0f, height / 2.0f,  depth / 2.0f),
-		glm::vec3(width / 2.0f, height / 2.0f,  -depth / 2.0f),
-		// bottom
-		glm::vec3(-width / 2.0f, -height / 2.0f,  -depth / 2.0f),
-		glm::vec3(width / 2.0f, -height / 2.0f,  -depth / 2.0f),
-		glm::vec3(width / 2.0f, -height / 2.0f,  depth / 2.0f),
-		glm::vec3(-width / 2.0f, -height / 2.0f,  depth / 2.0f)
-	};
+    data.positions = {
+        // front
+        glm::vec3(-width / 2.0f, -height / 2.0f, depth / 2.0f),
+        glm::vec3(width / 2.0f, -height / 2.0f, depth / 2.0f),
+        glm::vec3(width / 2.0f, height / 2.0f, depth / 2.0f),
+        glm::vec3(-width / 2.0f, height / 2.0f, depth / 2.0f),
+        // back
+        glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
+        glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
+        // right
+        glm::vec3(width / 2.0f, -height / 2.0f, depth / 2.0f),
+        glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
+        glm::vec3(width / 2.0f, height / 2.0f, depth / 2.0f),
+        // left
+        glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(-width / 2.0f, -height / 2.0f, depth / 2.0f),
+        glm::vec3(-width / 2.0f, height / 2.0f, depth / 2.0f),
+        glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
+        // top
+        glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
+        glm::vec3(-width / 2.0f, height / 2.0f, depth / 2.0f),
+        glm::vec3(width / 2.0f, height / 2.0f, depth / 2.0f),
+        glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
+        // bottom
+        glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(width / 2.0f, -height / 2.0f, depth / 2.0f),
+        glm::vec3(-width / 2.0f, -height / 2.0f, depth / 2.0f)
+    };
 
-	data.normals = {
-		// front
-		glm::vec3(0, 0, 1),
-		glm::vec3(0, 0, 1),
-		glm::vec3(0, 0, 1),
-		glm::vec3(0, 0, 1),
-		// back
-		glm::vec3(0, 0, -1),
-		glm::vec3(0, 0, -1),
-		glm::vec3(0, 0, -1),
-		glm::vec3(0, 0, -1),
-		// right
-		glm::vec3(1, 0, 0),
-		glm::vec3(1, 0, 0),
-		glm::vec3(1, 0, 0),
-		glm::vec3(1, 0, 0),
-		// left
-		glm::vec3(-1, 0, 0),
-		glm::vec3(-1, 0, 0),
-		glm::vec3(-1, 0, 0),
-		glm::vec3(-1, 0, 0),
-		// top
-		glm::vec3(0, 1, 0),
-		glm::vec3(0, 1, 0),
-		glm::vec3(0, 1, 0),
-		glm::vec3(0, 1, 0),
-		// bottom
-		glm::vec3(0, -1, 0),
-		glm::vec3(0, -1, 0),
-		glm::vec3(0, -1, 0),
-		glm::vec3(0, -1, 0)
-	};
+    data.normals = {
+        // front
+        glm::vec3(0, 0, 1),
+        glm::vec3(0, 0, 1),
+        glm::vec3(0, 0, 1),
+        glm::vec3(0, 0, 1),
+        // back
+        glm::vec3(0, 0, -1),
+        glm::vec3(0, 0, -1),
+        glm::vec3(0, 0, -1),
+        glm::vec3(0, 0, -1),
+        // right
+        glm::vec3(1, 0, 0),
+        glm::vec3(1, 0, 0),
+        glm::vec3(1, 0, 0),
+        glm::vec3(1, 0, 0),
+        // left
+        glm::vec3(-1, 0, 0),
+        glm::vec3(-1, 0, 0),
+        glm::vec3(-1, 0, 0),
+        glm::vec3(-1, 0, 0),
+        // top
+        glm::vec3(0, 1, 0),
+        glm::vec3(0, 1, 0),
+        glm::vec3(0, 1, 0),
+        glm::vec3(0, 1, 0),
+        // bottom
+        glm::vec3(0, -1, 0),
+        glm::vec3(0, -1, 0),
+        glm::vec3(0, -1, 0),
+        glm::vec3(0, -1, 0)
+    };
 
-	data.textureCoordinates = {
-		// front
-		glm::vec2(0, 0),
-		glm::vec2(1, 0),
-		glm::vec2(1, 1),
-		glm::vec2(0, 1),
-		// back
-		glm::vec2(1, 1),
-		glm::vec2(0, 1),
-		glm::vec2(0, 0),
-		glm::vec2(1, 0),
-		// right
-		glm::vec2(0, 0),
-		glm::vec2(1, 0),
-		glm::vec2(1, 1),
-		glm::vec2(0, 1),
-		// left
-		glm::vec2(0, 0),
-		glm::vec2(1, 0),
-		glm::vec2(1, 1),
-		glm::vec2(0, 1),
-		// top
-		glm::vec2(0, 1),
-		glm::vec2(0, 0),
-		glm::vec2(1, 0),
-		glm::vec2(1, 1),
-		// bottom
-		glm::vec2(0, 0),
-		glm::vec2(1, 0),
-		glm::vec2(1, 1),
-		glm::vec2(0, 1)
-	};
+    data.textureCoordinates = {
+        // front
+        glm::vec2(0, 0),
+        glm::vec2(1, 0),
+        glm::vec2(1, 1),
+        glm::vec2(0, 1),
+        // back
+        glm::vec2(1, 1),
+        glm::vec2(0, 1),
+        glm::vec2(0, 0),
+        glm::vec2(1, 0),
+        // right
+        glm::vec2(0, 0),
+        glm::vec2(1, 0),
+        glm::vec2(1, 1),
+        glm::vec2(0, 1),
+        // left
+        glm::vec2(0, 0),
+        glm::vec2(1, 0),
+        glm::vec2(1, 1),
+        glm::vec2(0, 1),
+        // top
+        glm::vec2(0, 1),
+        glm::vec2(0, 0),
+        glm::vec2(1, 0),
+        glm::vec2(1, 1),
+        // bottom
+        glm::vec2(0, 0),
+        glm::vec2(1, 0),
+        glm::vec2(1, 1),
+        glm::vec2(0, 1)
+    };
 
-	data.indices = {
-		// front
+    // clang-format off
+    data.indices = {
+        // front
 		0, 1, 2,
 		2, 3, 0,
-		// back
+        // back
 		4, 5, 6,
 		6, 7, 4,
-		// right
+        // right
 		8, 9, 10,
 		10, 11, 8,
-		// left
+        // left
 		12, 13, 14,
 		14, 15, 12,
-		// top
+        // top
 		16, 17, 18,
 		18, 19, 16,
-		// bottom
+        // bottom
 		20, 21, 22,
 		22, 23, 20
-	};
-	return data;
+    };
+    // clang-format on
+    return data;
 }
 
+GeometryData createCornellBoxGeometry(float width, float height, float depth) {
+    GeometryData data;
 
-GeometryData createCornellBoxGeometry(float width, float height, float depth)
-{
-	GeometryData data;
+    data.positions = {
+        // back
+        glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
+        glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
+        // right
+        glm::vec3(width / 2.0f, -height / 2.0f, depth / 2.0f),
+        glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
+        glm::vec3(width / 2.0f, height / 2.0f, depth / 2.0f),
+        // left
+        glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(-width / 2.0f, -height / 2.0f, depth / 2.0f),
+        glm::vec3(-width / 2.0f, height / 2.0f, depth / 2.0f),
+        glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
+        // top
+        glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
+        glm::vec3(-width / 2.0f, height / 2.0f, depth / 2.0f),
+        glm::vec3(width / 2.0f, height / 2.0f, depth / 2.0f),
+        glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
+        // bottom
+        glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
+        glm::vec3(width / 2.0f, -height / 2.0f, depth / 2.0f),
+        glm::vec3(-width / 2.0f, -height / 2.0f, depth / 2.0f)
+    };
 
-	data.positions = {
-		// back
-		glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
-		glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
-		glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
-		glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
-		// right
-		glm::vec3(width / 2.0f, -height / 2.0f, depth / 2.0f),
-		glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
-		glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
-		glm::vec3(width / 2.0f, height / 2.0f, depth / 2.0f),
-		// left
-		glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
-		glm::vec3(-width / 2.0f, -height / 2.0f, depth / 2.0f),
-		glm::vec3(-width / 2.0f, height / 2.0f, depth / 2.0f),
-		glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
-		// top
-		glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
-		glm::vec3(-width / 2.0f, height / 2.0f, depth / 2.0f),
-		glm::vec3(width / 2.0f, height / 2.0f, depth / 2.0f),
-		glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
-		// bottom
-		glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
-		glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
-		glm::vec3(width / 2.0f, -height / 2.0f, depth / 2.0f),
-		glm::vec3(-width / 2.0f, -height / 2.0f, depth / 2.0f)
-	};
+    data.normals = {
+        // back
+        glm::vec3(0, 0, 1),
+        glm::vec3(0, 0, 1),
+        glm::vec3(0, 0, 1),
+        glm::vec3(0, 0, 1),
+        // right
+        glm::vec3(-1, 0, 0),
+        glm::vec3(-1, 0, 0),
+        glm::vec3(-1, 0, 0),
+        glm::vec3(-1, 0, 0),
+        // left
+        glm::vec3(1, 0, 0),
+        glm::vec3(1, 0, 0),
+        glm::vec3(1, 0, 0),
+        glm::vec3(1, 0, 0),
+        // top
+        glm::vec3(0, -1, 0),
+        glm::vec3(0, -1, 0),
+        glm::vec3(0, -1, 0),
+        glm::vec3(0, -1, 0),
+        // bottom
+        glm::vec3(0, 1, 0),
+        glm::vec3(0, 1, 0),
+        glm::vec3(0, 1, 0),
+        glm::vec3(0, 1, 0)
+    };
 
-	data.normals = {
-		// back
-		glm::vec3(0, 0, 1),
-		glm::vec3(0, 0, 1),
-		glm::vec3(0, 0, 1),
-		glm::vec3(0, 0, 1),
-		// right
-		glm::vec3(-1, 0, 0),
-		glm::vec3(-1, 0, 0),
-		glm::vec3(-1, 0, 0),
-		glm::vec3(-1, 0, 0),
-		// left
-		glm::vec3(1, 0, 0),
-		glm::vec3(1, 0, 0),
-		glm::vec3(1, 0, 0),
-		glm::vec3(1, 0, 0),
-		// top
-		glm::vec3(0, -1, 0),
-		glm::vec3(0, -1, 0),
-		glm::vec3(0, -1, 0),
-		glm::vec3(0, -1, 0),
-		// bottom
-		glm::vec3(0, 1, 0),
-		glm::vec3(0, 1, 0),
-		glm::vec3(0, 1, 0),
-		glm::vec3(0, 1, 0)
-	};
+    glm::vec3 colors[5] = {
+        glm::vec3(CORNELL_LEFT_R, CORNELL_LEFT_G, CORNELL_LEFT_B),    // left
+        glm::vec3(CORNELL_RIGHT_R, CORNELL_RIGHT_G, CORNELL_RIGHT_B), // right
+        glm::vec3(0.96, 0.93, 0.85),                                  // top
+        glm::vec3(0.64, 0.64, 0.64),                                  // bottom
+        glm::vec3(0.76, 0.74, 0.68)                                   // back
+    };
 
-	glm::vec3 colors[5] = {
-		glm::vec3(CORNELL_LEFT_R, CORNELL_LEFT_G, CORNELL_LEFT_B),    // left
-		glm::vec3(CORNELL_RIGHT_R, CORNELL_RIGHT_G, CORNELL_RIGHT_B),    // right
-		glm::vec3(0.96, 0.93, 0.85), // top
-		glm::vec3(0.64, 0.64, 0.64), // bottom
-		glm::vec3(0.76, 0.74, 0.68)  // back
-	};
+    data.colors = {colors[4], colors[4], colors[4], colors[4],
 
-	data.colors = {
-			colors[4],
-			colors[4],
-			colors[4],
-			colors[4],
+                   colors[1], colors[1], colors[1], colors[1],
 
-			colors[1],
-			colors[1],
-			colors[1],
-			colors[1],
+                   colors[0], colors[0], colors[0], colors[0],
 
-			colors[0],
-			colors[0],
-			colors[0],
-			colors[0],
+                   colors[2], colors[2], colors[2], colors[2],
 
-			colors[2],
-			colors[2],
-			colors[2],
-			colors[2],
+                   colors[3], colors[3], colors[3], colors[3]};
 
-			colors[3],
-			colors[3],
-			colors[3],
-			colors[3]
-	};
+    data.textureCoordinates = {
+        // back
+        glm::vec2(1, 1),
+        glm::vec2(0, 1),
+        glm::vec2(0, 0),
+        glm::vec2(1, 0),
+        // right
+        glm::vec2(0, 0),
+        glm::vec2(1, 0),
+        glm::vec2(1, 1),
+        glm::vec2(0, 1),
+        // left
+        glm::vec2(0, 0),
+        glm::vec2(1, 0),
+        glm::vec2(1, 1),
+        glm::vec2(0, 1),
+        // top
+        glm::vec2(0, 1),
+        glm::vec2(0, 0),
+        glm::vec2(1, 0),
+        glm::vec2(1, 1),
+        // bottom
+        glm::vec2(0, 0),
+        glm::vec2(1, 0),
+        glm::vec2(1, 1),
+        glm::vec2(0, 1)
+    };
 
-	data.textureCoordinates = {
-		// back
-		glm::vec2(1, 1),
-		glm::vec2(0, 1),
-		glm::vec2(0, 0),
-		glm::vec2(1, 0),
-		// right
-		glm::vec2(0, 0),
-		glm::vec2(1, 0),
-		glm::vec2(1, 1),
-		glm::vec2(0, 1),
-		// left
-		glm::vec2(0, 0),
-		glm::vec2(1, 0),
-		glm::vec2(1, 1),
-		glm::vec2(0, 1),
-		// top
-		glm::vec2(0, 1),
-		glm::vec2(0, 0),
-		glm::vec2(1, 0),
-		glm::vec2(1, 1),
-		// bottom
-		glm::vec2(0, 0),
-		glm::vec2(1, 0),
-		glm::vec2(1, 1),
-		glm::vec2(0, 1)
-	};
-
-	data.indices = {
-		// back
+    // clang-format off
+    data.indices = {
+        // back
 		2, 1, 0,
 		0, 3, 2,
-		// right
+        // right
 		6, 5, 4,
 		4, 7, 6,
-		// left
+        // left
 		10, 9, 8,
 		8, 11, 10,
-		// top
+        // top
 		14, 13, 12,
 		12, 15, 14,
-		// bottom
+        // bottom
 		18, 17, 16,
 		16, 19, 18
-	};
+    };
+    // clang-format on
 
-	return data;
+    return data;
 }
 // clang-format on
 GeometryData createCylinderGeometry(uint32_t segments, float height, float radius) {
     GeometryData data;
-
 
     // center vertices
     data.positions.push_back(glm::vec3(0, -height / 2.0f, 0));
@@ -401,7 +385,12 @@ glm::vec3 calculateBezierTangent(const std::vector<glm::vec3>& controlPoints, fl
 }
 
 // Function to generate a Bezier curve and subdivide it into N segments
-void generateBezierCurve(const std::vector<glm::vec3>& controlPoints, int numSegments, std::vector<glm::vec3>& positions, std::vector<glm::vec3>& tangents) {
+void generateBezierCurve(
+    const std::vector<glm::vec3>& controlPoints,
+    int numSegments,
+    std::vector<glm::vec3>& positions,
+    std::vector<glm::vec3>& tangents
+) {
     float deltaT = 1.0f / (numSegments);
     for (int i = 0; i <= numSegments; ++i) {
         float t = i * deltaT;
@@ -412,7 +401,8 @@ void generateBezierCurve(const std::vector<glm::vec3>& controlPoints, int numSeg
     }
 }
 
-GeometryData createBezierCylinderGeometry(uint32_t n_circular_segments, std::vector<glm::vec3> controlPoints, uint32_t s_bezier_segments, float radius) {
+GeometryData
+createBezierCylinderGeometry(uint32_t n_circular_segments, std::vector<glm::vec3> controlPoints, uint32_t s_bezier_segments, float radius) {
     GeometryData data;
     std::vector<glm::vec3> bezierPoints;
     std::vector<glm::vec3> bezierTangents;
@@ -457,7 +447,6 @@ GeometryData createBezierCylinderGeometry(uint32_t n_circular_segments, std::vec
         if (point < bezierPoints.size() - 1) {
             v += glm::min(glm::length(bezierPoints[point + 1] - bezierPoints[point]), 1.0f);
         }
-
     }
     // top face
     data.positions.push_back(bezierPoints[bezierPoints.size() - 1]);
@@ -551,8 +540,7 @@ GeometryData createSphereGeometry(uint32_t longitude_segments, uint32_t latitude
             float u = float(j) / float(longitude_segments);
             data.textureCoordinates.push_back(glm::vec2(u, verticalAngle / glm::pi<float>()));
 
-            if (i == 1 || j == longitude_segments)
-                continue;
+            if (i == 1 || j == longitude_segments) continue;
 
             uint32_t ringStart = firstRingStart + (i - 1) * verticesPerRing;
             uint32_t prevRingStart = firstRingStart + (i - 2) * verticesPerRing;
@@ -598,7 +586,7 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data) {
     // Create vertex positions buffer and copy data into it:
     size_t positions_buffer_byte_size = geometry_data.positions.size() * sizeof(geometry_data.positions[0]);
     result.positionsBuffer = vklCreateHostCoherentBufferAndUploadData(
-        static_cast<const void *>(geometry_data.positions.data()),
+        static_cast<const void*>(geometry_data.positions.data()),
         positions_buffer_byte_size,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
     );
@@ -608,13 +596,19 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data) {
     if (geometry_data.colors.size() > 0) {
         size_t colors_buffer_byte_size = geometry_data.colors.size() * sizeof(geometry_data.colors[0]);
         result.colorsBuffer = vklCreateHostCoherentBufferAndUploadData(
-            geometry_data.colors.data(), colors_buffer_byte_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+            geometry_data.colors.data(),
+            colors_buffer_byte_size,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+        );
     }
 
     // Create vertex normals buffer and copy data into it:
     size_t normals_buffer_byte_size = geometry_data.normals.size() * sizeof(geometry_data.normals[0]);
     result.normalsBuffer = vklCreateHostCoherentBufferAndUploadData(
-        geometry_data.normals.data(), normals_buffer_byte_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+        geometry_data.normals.data(),
+        normals_buffer_byte_size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+    );
     // Create vertex texture coordinates buffer and copy data into it:
     size_t texture_coordinates_buffer_byte_size = geometry_data.textureCoordinates.size() * sizeof(geometry_data.textureCoordinates[0]);
     result.textureCoordinatesBuffer = vklCreateHostCoherentBufferAndUploadData(
@@ -644,4 +638,3 @@ void destroyGeometryGpuMemory(const Geometry& geometry) {
     }
     vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.positionsBuffer);
 }
-

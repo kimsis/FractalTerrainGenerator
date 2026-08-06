@@ -7,10 +7,10 @@
  */
 #pragma once
 
+#include <vulkan/vulkan.h>
 
 #include <glm/glm.hpp>
 #include <vector>
-#include <vulkan/vulkan.h>
 
 /*!
  *	A struct that contains all data for a geometry object on the CPU-side
@@ -27,7 +27,6 @@ struct GeometryData {
      * Vertex colors
      */
     std::vector<glm::vec3> colors;
-
 
     // A vector of vertex normals.
     std::vector<glm::vec3> normals;
@@ -53,7 +52,6 @@ struct Geometry {
 
     // A handle to a GPU buffer that contains vertex normal data.
     VkBuffer colorsBuffer;
-
 
     // A handle to a GPU buffer that contains vertex normal data.
     VkBuffer normalsBuffer;
@@ -106,7 +104,6 @@ GeometryData createBezierCylinderGeometry(unsigned int segments, std::vector<glm
  */
 GeometryData createSphereGeometry(uint32_t longitude_segments, uint32_t latitude_segments, float radius);
 
-
 /*!
  * Based on the (already populated!) GeometryData, creates gpu buffers for each of its elements
  * in host coherent GPU memory, uploads the data into these buffers, and returns a new Geometry
@@ -122,4 +119,3 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data);
  *	Frees the GPU buffers that have been created via createAndUploadIntoGpuMemory.
  */
 void destroyGeometryGpuMemory(const Geometry& geometry);
-

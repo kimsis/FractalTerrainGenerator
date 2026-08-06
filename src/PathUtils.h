@@ -16,6 +16,7 @@
 #else
 #include <limits.h>
 #include <unistd.h>
+
 #include <vector>
 #endif
 #include <VulkanLaunchpad.h>
@@ -63,15 +64,13 @@ inline std::string gcgFindFileInParentDir(std::filesystem::path currentDir, cons
 
     if (!cMakeListsExists && currentDir.parent_path() != currentDir) {
         return gcgFindFileInParentDir(currentDir.parent_path(), targetFile, candidates);
-    } 
+    }
 
     if (candidates.size() == 0) {
         return "";
-    } 
-    else if (candidates.size() == 1) {
+    } else if (candidates.size() == 1) {
         return candidates[0];
-    } 
-    else {
+    } else {
         VKL_WARNING("Ambiguous asset file path: '" << targetFile << "'");
         VKL_WARNING("Found this path at multiple locations. Don't know which one shall be used. Candidates are:");
         for (const auto& candidate : candidates) {
@@ -113,7 +112,7 @@ inline std::string gcgFindShaderFile(const std::string& targetFile) {
     return shaderPathResult;
 }
 
-template<size_t N, size_t M>
+template <size_t N, size_t M>
 inline std::vector<std::vector<std::string>> gcgFindAllShaderFiles(const char* shaders[N][M]) {
     std::vector<std::vector<std::string>> allShaderPaths;
 
