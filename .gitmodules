@@ -1,3 +1,3 @@
 [submodule "VulkanLaunchpad"]
-	path = VulkanLaunchpad
+	path = external/VulkanLaunchpad
 	url = https://github.com/cg-tuwien/VulkanLaunchpad.git

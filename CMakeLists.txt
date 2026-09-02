@@ -23,15 +23,38 @@ if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
     endif()
 endif()
 
-if(NOT EXISTS "${PROJECT_SOURCE_DIR}/VulkanLaunchpad/CMakeLists.txt")
+if(NOT EXISTS "${PROJECT_SOURCE_DIR}/external/VulkanLaunchpad/CMakeLists.txt")
     message(FATAL_ERROR "The submodules were not downloaded! GIT_SUBMODULE was turned off or failed. Please update submodules and try again.")
+endif()
+
+#================================#
+# Local patches for VulkanLaunchpad #
+#================================#
+# VulkanLaunchpad is a third-party submodule we can't commit fixes to directly;
+# local fixes are carried as patches (see patches/) and re-applied here so every
+# checkout gets them without a manual step. Safe on repeat configures - already
+# applied patches are detected and skipped by the script itself.
+find_program(BASH_PROGRAM bash)
+if(BASH_PROGRAM)
+    execute_process(COMMAND ${BASH_PROGRAM} "${PROJECT_SOURCE_DIR}/patches/apply-patches.sh"
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    RESULT_VARIABLE PATCH_APPLY_RESULT
+                    OUTPUT_VARIABLE PATCH_APPLY_OUTPUT
+                    ERROR_VARIABLE PATCH_APPLY_ERROR)
+    if(NOT PATCH_APPLY_RESULT EQUAL "0")
+        message(WARNING "Failed to apply local VulkanLaunchpad patches (see patches/apply-patches.sh):\n${PATCH_APPLY_OUTPUT}${PATCH_APPLY_ERROR}")
+    else()
+        message(STATUS "${PATCH_APPLY_OUTPUT}")
+    endif()
+else()
+    message(WARNING "bash not found - could not auto-apply patches/*.patch to VulkanLaunchpad. Run patches/apply-patches.sh manually (e.g. via Git Bash on Windows).")
 endif()
 
 
 #================================#
 # VulkanLaunchpad (dependency)   #
 #================================#
-add_subdirectory(VulkanLaunchpad)
+add_subdirectory(external/VulkanLaunchpad)
 
 #================================#
 # GCG Framework (prebuilt lib)   #
