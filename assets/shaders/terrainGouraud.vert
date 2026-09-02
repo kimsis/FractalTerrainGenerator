@@ -26,12 +26,6 @@ layout (binding = 1) uniform DirectionalLight {
 	vec4 direction;
 } dl_data;
 
-layout (binding = 2) uniform PointLight {
-	vec4 color;
-	vec4 position;
-	vec4 attenuation;
-} pl_data;
-
 layout (location = 0) out VertexData {
 	vec3 color;
 } vert_out;
@@ -87,16 +81,6 @@ void main() {
 		dl_data.color.rgb * in_color, diffuseF, 
 		dl_data.color.rgb,                specularF, specularA,
 		false, vec3(1.0)
-	);
-			
-	// Add point light's contribution:
-	color += phong(
-		n, 
-		pl_data.position.xyz - position_world.xyz, 
-		v, 
-		pl_data.color.rgb * in_color, diffuseF, 
-		pl_data.color.rgb,                specularF, specularA,
-		true, pl_data.attenuation.xyz
 	);
 
 	vert_out.color = color;

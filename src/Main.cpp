@@ -16,6 +16,10 @@
 #include "PathUtils.h"
 #include "Utils.h"
 
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
+
 #undef min
 #undef max
 
@@ -760,6 +764,35 @@ int main(int argc, char** argv) {
     VKL_LOG("Subtask 1.9 done.");
 
     /* --------------------------------------------- */
+    // Dear ImGui: init
+    /* --------------------------------------------- */
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+
+    // install_callbacks=false: we forward events ourselves from our own GLFW callbacks below,
+    // so dragging the camera and interacting with ImGui widgets don't fight over the same input.
+    ImGui_ImplGlfw_InitForVulkan(window, /*install_callbacks=*/false);
+
+    ImGui_ImplVulkan_InitInfo imgui_init_info = {};
+    imgui_init_info.ApiVersion = application_info.apiVersion;
+    imgui_init_info.Instance = vk_instance;
+    imgui_init_info.PhysicalDevice = vk_physical_device;
+    imgui_init_info.Device = vk_device;
+    imgui_init_info.QueueFamily = selected_queue_family_index;
+    imgui_init_info.Queue = vk_queue;
+    // Let the backend create its own small internal descriptor pool rather than managing one ourselves:
+    imgui_init_info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
+    imgui_init_info.MinImageCount = surface_capabilities.minImageCount;
+    imgui_init_info.ImageCount = swapchain_image_count;
+    imgui_init_info.PipelineInfoMain.RenderPass = vklGetRenderpass();
+    imgui_init_info.PipelineInfoMain.Subpass = 0u;
+    imgui_init_info.MinAllocationSize = 1024u * 1024u;
+    ImGui_ImplVulkan_Init(&imgui_init_info);
+    // Font atlas texture upload is automatic (handled internally on first NewFrame()) in this ImGui version -
+    // no manual one-shot command buffer needed here.
+
+    /* --------------------------------------------- */
     // Subtasks 2.1, 2.3, 3.5-3.7, 4.5, 5.5, 5.7: Set up the Demo Scene
     /* --------------------------------------------- */
     TerrainScene terrain_scene = setupTerrainScene(vk_device, vk_queue, selected_queue_family_index);
@@ -794,11 +827,21 @@ int main(int argc, char** argv) {
         glfwGetCursorPos(window, &mouse_x, &mouse_y);
         camera.update(mouse_x, mouse_y, g_zoom, g_dragging, g_strafing);
 
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // TODO (plan §6): build the actual GUI panel here (Hurst/Height/Water sliders, Reseed button).
+
+        ImGui::Render();
+
         // Wait until we get an image from the swapchain to render into:
         vklWaitForNextSwapchainImage();
         vklStartRecordingCommands();
 
         updateAndDrawTerrainScene(terrain_scene, camera);
+
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
 
         vklEndRecordingCommands();
         // Present rendered image to the screen:
@@ -833,6 +876,13 @@ int main(int argc, char** argv) {
     cleanupTerrainScene(vk_device, terrain_scene);
 
     /* --------------------------------------------- */
+    // Dear ImGui: shutdown
+    /* --------------------------------------------- */
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    /* --------------------------------------------- */
     // Subtask 1.12: Cleanup
     /* --------------------------------------------- */
     vklDestroyFramework();
@@ -853,6 +903,9 @@ int main(int argc, char** argv) {
 void errorCallbackFromGlfw(int error, const char* description) { std::cout << "GLFW error " << error << ": " << description << std::endl; }
 
 void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int action, int mods) {
+    ImGui_ImplGlfw_KeyCallback(glfw_window, key, scancode, action, mods);
+    if (ImGui::GetIO().WantCaptureKeyboard) return;
+
     if (action != GLFW_RELEASE) return;
     if (key == GLFW_KEY_ESCAPE) {
         glfwSetWindowShouldClose(glfw_window, true);
@@ -929,6 +982,9 @@ uint32_t selectQueueFamilyIndex(VkPhysicalDevice physical_device, VkSurfaceKHR s
  *	mouse button input that can be processed by our application.
  */
 void mouseButtonCallbackFromGlfw(GLFWwindow* glfw_window, int button, int action, int mods) {
+    ImGui_ImplGlfw_MouseButtonCallback(glfw_window, button, action, mods);
+    if (ImGui::GetIO().WantCaptureMouse) return;
+
     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
         g_dragging = true;
     } else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) {
@@ -944,7 +1000,12 @@ void mouseButtonCallbackFromGlfw(GLFWwindow* glfw_window, int button, int action
  *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
  *	mouse scroll input that can be processed by our application.
  */
-void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoffset) { g_zoom -= static_cast<float>(yoffset) * 0.5f; }
+void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoffset) {
+    ImGui_ImplGlfw_ScrollCallback(glfw_window, xoffset, yoffset);
+    if (ImGui::GetIO().WantCaptureMouse) return;
+
+    g_zoom -= static_cast<float>(yoffset) * 0.5f;
+}
 
 void addInstanceExtensionToVectorIfSupported(const char* extension_name, std::vector<const char*>& ref_vector) {
     VkResult result;

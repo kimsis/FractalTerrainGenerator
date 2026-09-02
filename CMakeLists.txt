@@ -74,6 +74,11 @@ else()
 endif()
 
 #================================#
+# Dear ImGui (GUI dependency)    #
+#================================#
+set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/imgui")
+
+#================================#
 # VulkanLaunchpadStarter         #
 #================================#
 add_executable(${PROJECT_NAME}
@@ -84,6 +89,16 @@ add_executable(${PROJECT_NAME}
     src/Geometry.cpp
     src/Utils.h
     src/Camera.h
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+)
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${IMGUI_DIR}
+    ${IMGUI_DIR}/backends
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE
     VulkanLaunchpad
