@@ -88,3 +88,6 @@ _project
 
 # macOS
 .DS_Store
+
+# Planning docs (not part of the submission)
+docs/PLAN.md

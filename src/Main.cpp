@@ -86,7 +86,6 @@ constexpr float SPHERE_ALPHA = 8.0f;
 
 constexpr size_t POLYMODES = 2;
 constexpr size_t CULLMODES = 3;
-constexpr size_t ILLUMODES = 1;
 
 /* --------------------------------------------- */
 // Helper Function Declarations
@@ -349,62 +348,37 @@ ImageAndView loadImage(VkDevice device, VkQueue queue, VkCommandPool command_poo
 
 /*!
  *	Holds every GPU resource (pipelines, geometries, uniform buffers, descriptor sets, textures)
- *	that make up the demo scene (Cornell box + box/cylinder/bezier-cylinder/sphere). Everything in
- *	here is unrelated to core Vulkan setup and can be dropped wholesale once it is no longer needed.
+ *	that make up the terrain scene (Terrain + dir light).
  */
-struct DemoScene {
+struct TerrainScene {
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
-    VkPipeline cornell_pipelines[POLYMODES][CULLMODES];
-    VkPipeline custom_pipelines[POLYMODES][CULLMODES][ILLUMODES];
-
-    VkCommandPool command_pool;
-    ImageAndView wood_texture;
-    ImageAndView tiles_diffuse;
-    VkSampler sampler;
+    VkPipeline pipelines[POLYMODES][CULLMODES];
 
     VkBuffer ub_dirlight;
-    VkBuffer ub_pointlight;
 
-    Geometry cornell_geometry;
-    VkBuffer ub_cornell;
-    VkDescriptorSet ds_cornell;
-
-    Geometry box_geometry;
-    VkBuffer ub_box;
-    VkDescriptorSet ds_box;
-
-    Geometry cylinder_geometry;
-    VkBuffer ub_cylinder;
-    VkDescriptorSet ds_cylinder;
-
-    Geometry bezier_cylinder_geometry;
-    VkBuffer ub_bezier_cylinder;
-    VkDescriptorSet ds_bezier_cylinder;
-
-    Geometry sphere_geometry;
-    VkBuffer ub_sphere;
-    VkDescriptorSet ds_sphere;
+    Geometry terrain_geometry;
+    VkBuffer ub_terrain;
+    VkDescriptorSet ds_terrain;
 };
 
 /*!
- *	Creates every pipeline, geometry, uniform buffer, descriptor set, and texture that the demo
- *	scene consists of. Comment out the call site in main() to skip creating the demo scene entirely.
+ *	Creates every pipeline, geometry, uniform buffer, descriptor set, and texture that the terrain
+ *	scene consists of.
  */
-DemoScene setupDemoScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index);
+TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index);
 
 /*!
- *	Updates the demo scene's uniform buffers based on the current camera, and records draw calls
+ *	Updates the terrain scene's uniform buffers based on the current camera, and records draw calls
  *	for it into the currently recording command buffer. Must be called between
- *	vklStartRecordingCommands() and vklEndRecordingCommands(). Comment out the call site in main()
- *	to stop the demo scene from being drawn.
+ *	vklStartRecordingCommands() and vklEndRecordingCommands().
  */
-void updateAndDrawDemoScene(DemoScene& scene, const Camera& camera);
+void updateAndDrawTerrainScene(TerrainScene& scene, const Camera& camera);
 
 /*!
- *	Destroys all GPU resources owned by the given demo scene.
+ *	Destroys all GPU resources owned by the given terrain scene.
  */
-void cleanupDemoScene(VkDevice vk_device, DemoScene& scene);
+void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene);
 
 static bool g_dragging = false;
 static bool g_strafing = false;
@@ -788,7 +762,7 @@ int main(int argc, char** argv) {
     /* --------------------------------------------- */
     // Subtasks 2.1, 2.3, 3.5-3.7, 4.5, 5.5, 5.7: Set up the Demo Scene
     /* --------------------------------------------- */
-    DemoScene demo_scene = setupDemoScene(vk_device, vk_queue, selected_queue_family_index);
+    TerrainScene terrain_scene = setupTerrainScene(vk_device, vk_queue, selected_queue_family_index);
 
     /* --------------------------------------------- */
     // Subtask 2.6: Orbit Camera
@@ -824,7 +798,7 @@ int main(int argc, char** argv) {
         vklWaitForNextSwapchainImage();
         vklStartRecordingCommands();
 
-        updateAndDrawDemoScene(demo_scene, camera);
+        updateAndDrawTerrainScene(terrain_scene, camera);
 
         vklEndRecordingCommands();
         // Present rendered image to the screen:
@@ -856,7 +830,7 @@ int main(int argc, char** argv) {
 
     // Cleanup:
     vklDestroyDeviceLocalImageAndItsBackingMemory(depth_buffer);
-    cleanupDemoScene(vk_device, demo_scene);
+    cleanupTerrainScene(vk_device, terrain_scene);
 
     /* --------------------------------------------- */
     // Subtask 1.12: Cleanup
@@ -1215,6 +1189,35 @@ void writeDescriptorSet(
 
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
 }
+
+void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer object_data, VkBuffer directional_light_data) {
+    // Write object data descriptor first:
+    writeDescriptorSet(device, descriptor_set, object_data);
+
+    // Then write the rest:
+
+    // Prepare info about directional light data:
+    VkDescriptorBufferInfo dirlight_buffer_info = {};
+    dirlight_buffer_info.buffer = directional_light_data;
+    dirlight_buffer_info.offset = static_cast<VkDeviceSize>(0);
+    dirlight_buffer_info.range = VK_WHOLE_SIZE;
+
+    std::vector<VkWriteDescriptorSet> writes = {VkWriteDescriptorSet{
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        nullptr,
+        descriptor_set,
+        /* dstBinding: */ 1u,
+        0u,
+        1u,
+        /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        nullptr,
+        /* pBufferInfo: */ &dirlight_buffer_info,
+        nullptr
+    }};
+
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
+}
+
 void writeDescriptorSet(
     VkDevice device,
     VkDescriptorSet descriptor_set,
@@ -1522,8 +1525,8 @@ ImageAndView loadImage(VkDevice device, VkQueue queue, VkCommandPool command_poo
 // Demo Scene (safe to remove; comment out its call sites in main() to drop it)
 /* --------------------------------------------- */
 
-DemoScene setupDemoScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index) {
-    DemoScene scene{};
+TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index) {
+    TerrainScene scene{};
 
     /* --------------------------------------------- */
     // Subtask 2.1: Create a Custom Graphics Pipeline
@@ -1531,11 +1534,6 @@ DemoScene setupDemoScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected
     std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings = {
         VkDescriptorSetLayoutBinding{0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
         VkDescriptorSetLayoutBinding{1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-        VkDescriptorSetLayoutBinding{2u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-        /* --------------------------------------------- */
-        // Subtask 5.8: Use the Textures in Shaders
-        /* --------------------------------------------- */
-        VkDescriptorSetLayoutBinding{3u, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1u, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
     };
 
     /* --------------------------------------------- */
@@ -1543,13 +1541,12 @@ DemoScene setupDemoScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected
     /* --------------------------------------------- */
     VkPolygonMode polygon_modes[POLYMODES] = {VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE};
     VkCullModeFlags cull_modes[CULLMODES] = {VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT};
-    const char* shaders[ILLUMODES][2] = {{"assets/shaders/texture.vert", "assets/shaders/texture.frag"}};
-    // prepare cornell box pipeline
-    std::string vertexShaderPath = gcgFindShaderFile("assets/shaders/cornellGouraud.vert");
-    std::string fragmentShaderPath = gcgFindShaderFile("assets/shaders/cornellGouraud.frag");
+    // prepare terrain pipelines
+    std::string vertexShaderPath = gcgFindShaderFile("assets/shaders/terrainGouraud.vert");
+    std::string fragmentShaderPath = gcgFindShaderFile("assets/shaders/terrainGouraud.frag");
     for (size_t i = 0; i < POLYMODES; ++i) {
         for (size_t j = 0; j < CULLMODES; ++j) {
-            VklGraphicsPipelineConfig cornell_pipeline_config{
+            VklGraphicsPipelineConfig pipeline_config{
                 vertexShaderPath.c_str(),
                 fragmentShaderPath.c_str(),
                 {
@@ -1572,66 +1569,18 @@ DemoScene setupDemoScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected
                 cull_modes[j],
                 descriptor_set_layout_bindings,
             };
-            scene.cornell_pipelines[i][j] = vklCreateGraphicsPipeline(cornell_pipeline_config);
-        }
-    }
-
-    // Prepare one pipeline for every combination of cull mode and polygon mode:
-    for (size_t i = 0; i < POLYMODES; ++i) {
-        for (size_t j = 0; j < CULLMODES; ++j) {
-            std::vector<std::vector<std::string>> allShaderPaths = gcgFindAllShaderFiles<ILLUMODES, 2>(shaders);
-            for (size_t k = 0; k < ILLUMODES; ++k) {
-                VklGraphicsPipelineConfig custom_pipeline_config{
-                    allShaderPaths[k][0].c_str(),
-                    allShaderPaths[k][1].c_str(),
-                    {
-                        VkVertexInputBindingDescription{0u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
-                        /* --------------------------------------------- */
-                        // Subtask 4.4: Normals As Additional Vertex Attributes
-                        /* --------------------------------------------- */
-                        VkVertexInputBindingDescription{1u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
-                        /* --------------------------------------------- */
-                        // Subtask 5.4: Pass UV Coordinates As Vertex Attributes
-                        /* --------------------------------------------- */
-                        VkVertexInputBindingDescription{2u, sizeof(float) * 2, VK_VERTEX_INPUT_RATE_VERTEX},
-                    },
-                    {
-                        VkVertexInputAttributeDescription{0u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
-                        /* --------------------------------------------- */
-                        // Subtask 4.4: Normals As Additional Vertex Attributes
-                        /* --------------------------------------------- */
-                        VkVertexInputAttributeDescription{1u, 1u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
-                        /* --------------------------------------------- */
-                        // Subtask 5.4: Pass UV Coordinates As Vertex Attributes
-                        /* --------------------------------------------- */
-                        VkVertexInputAttributeDescription{2u, 2u, VK_FORMAT_R32G32_SFLOAT, 0u},
-                    },
-                    /* --------------------------------------------- */
-                    // Subtask 3.1: Wireframe Mode
-                    /* --------------------------------------------- */
-                    polygon_modes[i],
-                    /* --------------------------------------------- */
-                    // Subtask 3.2: Back-face Culling
-                    /* --------------------------------------------- */
-                    cull_modes[j],
-                    descriptor_set_layout_bindings,
-                };
-                scene.custom_pipelines[i][j][k] = vklCreateGraphicsPipeline(custom_pipeline_config);
-            }
+            scene.pipelines[i][j] = vklCreateGraphicsPipeline(pipeline_config);
         }
     }
 
     /* --------------------------------------------- */
     // Subtask 2.3: Allocate and Write Descriptors
     /* --------------------------------------------- */
-    std::vector<VkDescriptorPoolSize> pool_sizes{
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 24u},
-        VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 12u},
-    };
+    std::vector<VkDescriptorPoolSize> pool_sizes{VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2u}};
 
     VkDescriptorPoolCreateInfo descriptor_pool_create_info = {};
     descriptor_pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptor_pool_create_info.maxSets = 8u;
+    descriptor_pool_create_info.maxSets = 1u;
     descriptor_pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
     descriptor_pool_create_info.pPoolSizes = pool_sizes.data();
 
@@ -1647,13 +1596,7 @@ DemoScene setupDemoScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected
     result = vkCreateDescriptorSetLayout(vk_device, &descriptor_set_layout_create_info, nullptr, &scene.descriptor_set_layout);
     VKL_CHECK_VULKAN_RESULT(result);
 
-    /* --------------------------------------------- */
-    // Subtasks 3.5 to 3.7: Geometric Objects
-    // Subtask 4.5: Create Uniform Buffers for Lights
-    // Subtask 5.5: Load DDS Textures into Images
-    /* --------------------------------------------- */
-
-    // Create buffers for the light sources
+    // Create buffer for the light source
     VkDeviceSize num_dirlights = 1;
     scene.ub_dirlight = vklCreateHostCoherentBufferWithBackingMemory(
         sizeof(DirectionalLight) * num_dirlights,
@@ -1662,102 +1605,17 @@ DemoScene setupDemoScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected
     DirectionalLight directional_light = {DIRLIGHT_COLOR, glm::normalize(DIRLIGHT_DIR)};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_dirlight, &directional_light, sizeof(DirectionalLight));
 
-    VkDeviceSize num_pointlights = 1;
-    scene.ub_pointlight = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(PointLight) * num_pointlights,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-    );
-    PointLight point_light = {POINTLIGHT_COLOR, POINTLIGHT_POS, POINTLIGHT_ATTENUATION};
-    vklCopyDataIntoHostCoherentBuffer(scene.ub_pointlight, &point_light, sizeof(PointLight));
-
-    /* --------------------------------------------- */
-    // Subtask 5.5: Load DDS Textures into Images
-    /* --------------------------------------------- */
-    VkCommandPoolCreateInfo command_pool_create_info = {};
-    command_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    command_pool_create_info.queueFamilyIndex = selected_queue_family_index;
-
-    vkCreateCommandPool(vk_device, &command_pool_create_info, nullptr, &scene.command_pool);
-
-    scene.wood_texture = loadImage(vk_device, vk_queue, scene.command_pool, "assets/textures/wood_texture.dds");
-    scene.tiles_diffuse = loadImage(vk_device, vk_queue, scene.command_pool, "assets/textures/tiles_diffuse.dds");
-
-    /* --------------------------------------------- */
-    // Subtask 5.7: Create a Sampler
-    /* --------------------------------------------- */
-    VkSamplerCreateInfo sampler_create_info = {};
-    sampler_create_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler_create_info.magFilter = VK_FILTER_LINEAR;
-    sampler_create_info.minFilter = VK_FILTER_LINEAR;
-    sampler_create_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_create_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_create_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-    sampler_create_info.minLod = 0.0f;
-    sampler_create_info.maxLod = VK_LOD_CLAMP_NONE;
-    result = vkCreateSampler(vk_device, &sampler_create_info, nullptr, &scene.sampler);
-    VKL_CHECK_VULKAN_RESULT(result);
-
-    // cornell box geometry and material
-    scene.cornell_geometry = createAndUploadIntoGpuMemory(createCornellBoxGeometry(CORNELL_WIDTH, CORNELL_HEIGHT, CORNELL_DEPTH));
-    scene.ub_cornell =
+    // terrain geometry and material
+    scene.terrain_geometry = createAndUploadIntoGpuMemory(createTerrainGeometry(CORNELL_WIDTH, CORNELL_HEIGHT, CORNELL_DEPTH));
+    scene.ub_terrain =
         vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    scene.ds_cornell = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
-    writeDescriptorSet(vk_device, scene.ds_cornell, scene.ub_cornell, scene.ub_dirlight, scene.ub_pointlight);
-
-    // Box geometry and material:
-    scene.box_geometry = createAndUploadIntoGpuMemory(createBoxGeometry(BOX_WIDTH, BOX_HEIGHT, BOX_DEPTH));
-    scene.ub_box =
-        vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    scene.ds_box = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
-    writeDescriptorSet(vk_device, scene.ds_box, scene.ub_box, scene.ub_dirlight, scene.ub_pointlight, scene.wood_texture.view, scene.sampler);
-    // Cylinder Material:
-    scene.cylinder_geometry = createAndUploadIntoGpuMemory(createCylinderGeometry(CYLINDER_SEGMENTS, CYLINDER_HEIGHT, CYLINDER_RADIUS));
-    scene.ub_cylinder =
-        vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    scene.ds_cylinder = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
-    writeDescriptorSet(
-        vk_device,
-        scene.ds_cylinder,
-        scene.ub_cylinder,
-        scene.ub_dirlight,
-        scene.ub_pointlight,
-        scene.wood_texture.view,
-        scene.sampler
-    );
-    // Cylinder Bezier Material:
-    std::vector<glm::vec3> controlPoints = {
-        glm::vec3(-0.3f, 0.6f, 0.0f),
-        glm::vec3(0.0f, 1.6f, 0.0f),
-        glm::vec3(1.4f, 0.3f, 0.0f),
-        glm::vec3(0.0f, 0.3f, 0.0f),
-        glm::vec3(0.0f, -0.5f, 0.0f),
-    };
-    scene.bezier_cylinder_geometry =
-        createAndUploadIntoGpuMemory(createBezierCylinderGeometry(BEZIER_CIRCULAR_SEGMENTS_N, controlPoints, BEZIER_SEGMENTS_S, BEZIER_RADIUS));
-    scene.ub_bezier_cylinder =
-        vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    scene.ds_bezier_cylinder = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
-    writeDescriptorSet(
-        vk_device,
-        scene.ds_bezier_cylinder,
-        scene.ub_bezier_cylinder,
-        scene.ub_dirlight,
-        scene.ub_pointlight,
-        scene.tiles_diffuse.view,
-        scene.sampler
-    );
-
-    // Sphere Material:
-    scene.sphere_geometry = createAndUploadIntoGpuMemory(createSphereGeometry(SPHERE_LON_SEG, SPHERE_LAT_SEG, SPHERE_RADIUS));
-    scene.ub_sphere =
-        vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    scene.ds_sphere = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
-    writeDescriptorSet(vk_device, scene.ds_sphere, scene.ub_sphere, scene.ub_dirlight, scene.ub_pointlight, scene.tiles_diffuse.view, scene.sampler);
+    scene.ds_terrain = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
+    writeDescriptorSet(vk_device, scene.ds_terrain, scene.ub_terrain, scene.ub_dirlight);
 
     return scene;
 }
 
-void updateAndDrawDemoScene(DemoScene& scene, const Camera& camera) {
+void updateAndDrawTerrainScene(TerrainScene& scene, const Camera& camera) {
     UniformBuffer ub_data;
     ub_data.userInput[0] = g_draw_normals ? 1 : 0;
     ub_data.userInput[1] = g_draw_fresnel ? 1 : 0;
@@ -1767,76 +1625,27 @@ void updateAndDrawDemoScene(DemoScene& scene, const Camera& camera) {
     ub_data.viewProjMatrix = camera.getViewProjectionMatrix();
     ub_data.cameraPosition = glm::vec4{camera.getPosition(), 1.0f};
     ub_data.color = {1.f, 1.f, 1.f, 1.f};
-    // Update cornell box:
+    // Update terrain:
     ub_data.color = {0.7f, 0.1f, 0.2f, 1.0f};
     ub_data.modelMatrix = glm::mat4{1.0f};
     ub_data.modelMatrixForNormals = glm::mat4{1.0f};
     ub_data.materialProperties = {CORNELL_KA, CORNELL_KD, CORNELL_KS, CORNELL_ALPHA};
-    vklCopyDataIntoHostCoherentBuffer(scene.ub_cornell, &ub_data, sizeof(UniformBuffer));
-    // Update box:
-    ub_data.modelMatrix = glm::translate(glm::mat4{1.0f}, BOX_POSITION) * glm::rotate(glm::mat4{1.0f}, glm::radians(BOX_ROT_DEGREES), BOX_ROT_AXIS);
-    ub_data.modelMatrixForNormals = glm::transpose(glm::inverse(ub_data.modelMatrix));
-    ub_data.materialProperties = {BOX_KA, BOX_KD, BOX_KS, BOX_ALPHA};
-    vklCopyDataIntoHostCoherentBuffer(scene.ub_box, &ub_data, sizeof(UniformBuffer));
+    vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain, &ub_data, sizeof(UniformBuffer));
 
-    // Update sphere
-    ub_data.modelMatrix = glm::translate(glm::mat4{1.0f}, SPHERE_POSITION);
-    ub_data.modelMatrixForNormals = glm::transpose(glm::inverse(ub_data.modelMatrix));
-    ub_data.materialProperties = {SPHERE_KA, SPHERE_KD, SPHERE_KS, SPHERE_ALPHA};
-    vklCopyDataIntoHostCoherentBuffer(scene.ub_sphere, &ub_data, sizeof(UniformBuffer));
-
-    // Update cylinder:
-    ub_data.modelMatrix = glm::translate(glm::mat4{1.0f}, CYLINDER_POSITION);
-    ub_data.modelMatrixForNormals = glm::transpose(glm::inverse(ub_data.modelMatrix));
-    ub_data.materialProperties = {CYLINDER_KA, CYLINDER_KD, CYLINDER_KS, CYLINDER_ALPHA};
-    vklCopyDataIntoHostCoherentBuffer(scene.ub_cylinder, &ub_data, sizeof(UniformBuffer));
-
-    // Update bezier cylinder:
-    ub_data.modelMatrix = glm::translate(glm::mat4{1.0f}, BEZIER_POSITION);
-    ub_data.modelMatrixForNormals = glm::transpose(glm::inverse(ub_data.modelMatrix));
-    ub_data.materialProperties = {BEZIER_KA, BEZIER_KD, BEZIER_KS, BEZIER_ALPHA};
-    vklCopyDataIntoHostCoherentBuffer(scene.ub_bezier_cylinder, &ub_data, sizeof(UniformBuffer));
-
-    VkPipeline selected_cornell_pipeline = scene.cornell_pipelines[g_polygon_mode_index][g_culling_index];
-    drawGeometryWithMaterial(selected_cornell_pipeline, scene.cornell_geometry, scene.ds_cornell);
-    drawGeometryWithMaterial(scene.custom_pipelines[g_polygon_mode_index][g_culling_index][0], scene.box_geometry, scene.ds_box);
-    drawGeometryWithMaterial(scene.custom_pipelines[g_polygon_mode_index][g_culling_index][0], scene.cylinder_geometry, scene.ds_cylinder);
-    drawGeometryWithMaterial(
-        scene.custom_pipelines[g_polygon_mode_index][g_culling_index][0],
-        scene.bezier_cylinder_geometry,
-        scene.ds_bezier_cylinder
-    );
-    drawGeometryWithMaterial(scene.custom_pipelines[g_polygon_mode_index][g_culling_index][0], scene.sphere_geometry, scene.ds_sphere);
+    VkPipeline selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
+    drawGeometryWithMaterial(selected_pipeline, scene.terrain_geometry, scene.ds_terrain);
 }
 
-void cleanupDemoScene(VkDevice vk_device, DemoScene& scene) {
+void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
     vkDestroyDescriptorSetLayout(vk_device, scene.descriptor_set_layout, nullptr);
     vkDestroyDescriptorPool(vk_device, scene.descriptor_pool, nullptr);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_cornell);
-    destroyGeometryGpuMemory(scene.cornell_geometry);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_sphere);
-    destroyGeometryGpuMemory(scene.sphere_geometry);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_bezier_cylinder);
-    destroyGeometryGpuMemory(scene.bezier_cylinder_geometry);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_cylinder);
-    destroyGeometryGpuMemory(scene.cylinder_geometry);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_box);
-    destroyGeometryGpuMemory(scene.box_geometry);
-    vkDestroySampler(vk_device, scene.sampler, nullptr);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_pointlight);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain);
+    destroyGeometryGpuMemory(scene.terrain_geometry);
     vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_dirlight);
-    vkDestroyImageView(vk_device, scene.tiles_diffuse.view, nullptr);
-    vklDestroyDeviceLocalImageAndItsBackingMemory(scene.tiles_diffuse.image);
-    vkDestroyImageView(vk_device, scene.wood_texture.view, nullptr);
-    vklDestroyDeviceLocalImageAndItsBackingMemory(scene.wood_texture.image);
-    vkDestroyCommandPool(vk_device, scene.command_pool, nullptr);
 
     for (size_t i = 0; i < POLYMODES; ++i) {
         for (size_t j = 0; j < CULLMODES; ++j) {
-            vklDestroyGraphicsPipeline(scene.cornell_pipelines[i][j]);
-            for (size_t k = 0; k < ILLUMODES; ++k) {
-                vklDestroyGraphicsPipeline(scene.custom_pipelines[i][j][k]);
-            }
+            vklDestroyGraphicsPipeline(scene.pipelines[i][j]);
         }
     }
 }
