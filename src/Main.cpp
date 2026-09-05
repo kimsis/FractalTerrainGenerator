@@ -12,13 +12,12 @@
 #include <vector>
 
 #include "Camera.h"
-#include "Geometry.h"
-#include "PathUtils.h"
-#include "Utils.h"
-
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
+#include "terrain/Geometry.h"
+#include "utils/PathUtils.h"
+#include "utils/Utils.h"
 
 #undef min
 #undef max
