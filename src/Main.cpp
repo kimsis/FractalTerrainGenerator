@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "Camera.h"
+#include "DiamondSquareGenerator.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
@@ -1665,8 +1666,9 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
     DirectionalLight directional_light = {DIRLIGHT_COLOR, glm::normalize(DIRLIGHT_DIR)};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_dirlight, &directional_light, sizeof(DirectionalLight));
 
+    TerrainParams params;
     // terrain geometry and material
-    scene.terrain_geometry = createAndUploadIntoGpuMemory(createTerrainGeometry(CORNELL_WIDTH, CORNELL_HEIGHT, CORNELL_DEPTH));
+    scene.terrain_geometry = createAndUploadIntoGpuMemory(generateTerrainGeometry(params));
     scene.ub_terrain =
         vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     scene.ds_terrain = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);

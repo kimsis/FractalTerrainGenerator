@@ -12,6 +12,8 @@
 #include <glm/glm.hpp>
 #include <vector>
 
+#include "DiamondSquareGenerator.h"
+
 /*!
  *	A struct that contains all data for a geometry object on the CPU-side
  */
@@ -62,12 +64,10 @@ struct Geometry {
 
 /*!
  *	Creates terrain geometry with vertex color attribute
- *	@param width		width of the box
- *	@param height		height of the box
- *	@param depth		depth of the box
- *	@return all box data
+ *	@param params parameters for terrain generation
+ *	@return all terrain data
  */
-GeometryData createTerrainGeometry(float width, float height, float depth);
+GeometryData generateTerrainGeometry(const TerrainParams& params);
 
 /*!
  * Based on the (already populated!) GeometryData, creates gpu buffers for each of its elements

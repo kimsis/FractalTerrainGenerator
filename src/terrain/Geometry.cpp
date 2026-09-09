@@ -10,142 +10,20 @@
 
 #include <glm/gtc/constants.hpp>
 
-#include "Utils.h"
+#include "../utils/Utils.h"
+#include "DiamondSquareGenerator.h"
 
-#undef min
-#undef max
-
-constexpr float CORNELL_LEFT_R = 0.49f;
-constexpr float CORNELL_LEFT_G = 0.06f;
-constexpr float CORNELL_LEFT_B = 0.22f;
-constexpr float CORNELL_RIGHT_R = 0.0f;
-constexpr float CORNELL_RIGHT_G = 0.13f;
-constexpr float CORNELL_RIGHT_B = 0.31f;
-
-GeometryData createTerrainGeometry(float width, float height, float depth) {
+GeometryData generateTerrainGeometry(const TerrainParams& params) {
     GeometryData data;
+    DiamondSquareGenerator generator = DiamondSquareGenerator();
+    generator.SetParams(params);
+    generator.ComputeTerrain();
 
-    data.positions = {
-        // back
-        glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
-        glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
-        glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
-        glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
-        // right
-        glm::vec3(width / 2.0f, -height / 2.0f, depth / 2.0f),
-        glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
-        glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
-        glm::vec3(width / 2.0f, height / 2.0f, depth / 2.0f),
-        // left
-        glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
-        glm::vec3(-width / 2.0f, -height / 2.0f, depth / 2.0f),
-        glm::vec3(-width / 2.0f, height / 2.0f, depth / 2.0f),
-        glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
-        // top
-        glm::vec3(-width / 2.0f, height / 2.0f, -depth / 2.0f),
-        glm::vec3(-width / 2.0f, height / 2.0f, depth / 2.0f),
-        glm::vec3(width / 2.0f, height / 2.0f, depth / 2.0f),
-        glm::vec3(width / 2.0f, height / 2.0f, -depth / 2.0f),
-        // bottom
-        glm::vec3(-width / 2.0f, -height / 2.0f, -depth / 2.0f),
-        glm::vec3(width / 2.0f, -height / 2.0f, -depth / 2.0f),
-        glm::vec3(width / 2.0f, -height / 2.0f, depth / 2.0f),
-        glm::vec3(-width / 2.0f, -height / 2.0f, depth / 2.0f)
-    };
+    data.positions = generator.getPositions();
 
-    data.normals = {
-        // back
-        glm::vec3(0, 0, 1),
-        glm::vec3(0, 0, 1),
-        glm::vec3(0, 0, 1),
-        glm::vec3(0, 0, 1),
-        // right
-        glm::vec3(-1, 0, 0),
-        glm::vec3(-1, 0, 0),
-        glm::vec3(-1, 0, 0),
-        glm::vec3(-1, 0, 0),
-        // left
-        glm::vec3(1, 0, 0),
-        glm::vec3(1, 0, 0),
-        glm::vec3(1, 0, 0),
-        glm::vec3(1, 0, 0),
-        // top
-        glm::vec3(0, -1, 0),
-        glm::vec3(0, -1, 0),
-        glm::vec3(0, -1, 0),
-        glm::vec3(0, -1, 0),
-        // bottom
-        glm::vec3(0, 1, 0),
-        glm::vec3(0, 1, 0),
-        glm::vec3(0, 1, 0),
-        glm::vec3(0, 1, 0)
-    };
+    data.normals = generator.getNormals();
 
-    glm::vec3 colors[5] = {
-        glm::vec3(CORNELL_LEFT_R, CORNELL_LEFT_G, CORNELL_LEFT_B),    // left
-        glm::vec3(CORNELL_RIGHT_R, CORNELL_RIGHT_G, CORNELL_RIGHT_B), // right
-        glm::vec3(0.96, 0.93, 0.85),                                  // top
-        glm::vec3(0.64, 0.64, 0.64),                                  // bottom
-        glm::vec3(0.76, 0.74, 0.68)                                   // back
-    };
-
-    data.colors = {colors[4], colors[4], colors[4], colors[4],
-
-                   colors[1], colors[1], colors[1], colors[1],
-
-                   colors[0], colors[0], colors[0], colors[0],
-
-                   colors[2], colors[2], colors[2], colors[2],
-
-                   colors[3], colors[3], colors[3], colors[3]};
-
-    data.textureCoordinates = {
-        // back
-        glm::vec2(1, 1),
-        glm::vec2(0, 1),
-        glm::vec2(0, 0),
-        glm::vec2(1, 0),
-        // right
-        glm::vec2(0, 0),
-        glm::vec2(1, 0),
-        glm::vec2(1, 1),
-        glm::vec2(0, 1),
-        // left
-        glm::vec2(0, 0),
-        glm::vec2(1, 0),
-        glm::vec2(1, 1),
-        glm::vec2(0, 1),
-        // top
-        glm::vec2(0, 1),
-        glm::vec2(0, 0),
-        glm::vec2(1, 0),
-        glm::vec2(1, 1),
-        // bottom
-        glm::vec2(0, 0),
-        glm::vec2(1, 0),
-        glm::vec2(1, 1),
-        glm::vec2(0, 1)
-    };
-
-    // clang-format off
-    data.indices = {
-        // back
-		2, 1, 0,
-		0, 3, 2,
-        // right
-		6, 5, 4,
-		4, 7, 6,
-        // left
-		10, 9, 8,
-		8, 11, 10,
-        // top
-		14, 13, 12,
-		12, 15, 14,
-        // bottom
-		18, 17, 16,
-		16, 19, 18
-    };
-    // clang-format on
+    data.indices = generator.getIndices();
 
     return data;
 }
