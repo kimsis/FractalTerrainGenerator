@@ -30,68 +30,21 @@ constexpr float BACKGROUND_R = 0.14f;
 constexpr float BACKGROUND_G = 0.4f;
 constexpr float BACKGROUND_B = 0.37f;
 
-constexpr float CORNELL_WIDTH = 3.0f;
-constexpr float CORNELL_HEIGHT = 3.0f;
-constexpr float CORNELL_DEPTH = 3.0f;
-
-constexpr uint32_t CYLINDER_SEGMENTS = 20;
-constexpr float CYLINDER_HEIGHT = 1.6f;
-constexpr float CYLINDER_RADIUS = 0.21f;
-
-constexpr uint32_t BEZIER_CIRCULAR_SEGMENTS_N = 20;
-constexpr uint32_t BEZIER_SEGMENTS_S = 36;
-constexpr float BEZIER_RADIUS = 0.21f;
-
-constexpr float BOX_WIDTH = 0.34f;
-constexpr float BOX_HEIGHT = 0.34f;
-constexpr float BOX_DEPTH = 0.34f;
-
-constexpr uint32_t SPHERE_LON_SEG = 36;
-constexpr uint32_t SPHERE_LAT_SEG = 18;
-constexpr float SPHERE_RADIUS = 0.26f;
-
-constexpr glm::vec3 BOX_POSITION = glm::vec3(-0.6f, -0.9f, 0.0f);
-constexpr glm::vec3 CYLINDER_POSITION = glm::vec3(0.6f, 0.3f, 0.0f);
-constexpr glm::vec3 BEZIER_POSITION = glm::vec3(-0.6f, 0.0f, 0.0f);
-constexpr glm::vec3 SPHERE_POSITION = glm::vec3(0.6f, -0.9f, 0.0f);
-
 constexpr glm::vec4 DIRLIGHT_COLOR = glm::vec4(0.85f, 0.85f, 0.85f, 0.0f);
 constexpr glm::vec4 DIRLIGHT_DIR = glm::vec4(0.0f, 1.0f, -1.0f, 0.0f);
-constexpr glm::vec4 POINTLIGHT_COLOR = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
-constexpr glm::vec4 POINTLIGHT_POS = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-constexpr glm::vec4 POINTLIGHT_ATTENUATION = glm::vec4(1.0f, 0.4f, 0.1f, 0.0f);
 
 constexpr float CORNELL_KA = 0.1f;
 constexpr float CORNELL_KD = 0.9f;
 constexpr float CORNELL_KS = 0.3f;
 constexpr float CORNELL_ALPHA = 10.0f;
 
-constexpr float BOX_KA = 0.1f;
-constexpr float BOX_KD = 0.7f;
-constexpr float BOX_KS = 0.1f;
-constexpr float BOX_ALPHA = 2.0f;
-constexpr glm::vec3 BOX_ROT_AXIS = glm::vec3(0.0f, 1.0f, 0.0f);
-constexpr float BOX_ROT_DEGREES = 45.0f;
-
-constexpr float CYLINDER_KA = 0.1f;
-constexpr float CYLINDER_KD = 0.7f;
-constexpr float CYLINDER_KS = 0.1f;
-constexpr float CYLINDER_ALPHA = 2.0f;
-
-constexpr float BEZIER_KA = 0.1f;
-constexpr float BEZIER_KD = 0.7f;
-constexpr float BEZIER_KS = 0.3f;
-constexpr float BEZIER_ALPHA = 8.0f;
-
-constexpr float SPHERE_KA = 0.1f;
-constexpr float SPHERE_KD = 0.7f;
-constexpr float SPHERE_KS = 0.3f;
-constexpr float SPHERE_ALPHA = 8.0f;
-
 constexpr size_t POLYMODES = 2;
 constexpr size_t CULLMODES = 3;
 constexpr VkPolygonMode kTerrainPolygonModes[POLYMODES] = {VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE};
 constexpr VkCullModeFlags kTerrainCullModes[CULLMODES] = {VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT};
+
+ImGuiWindowFlags window_flags = 0;
+bool g_panel_open = true;
 
 /* --------------------------------------------- */
 // Helper Function Declarations
@@ -384,6 +337,11 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
 TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index);
 
 /*!
+ * Builds the ImGUI Sidebar
+ */
+void buildGUI();
+
+/*!
  *	Updates the terrain scene's uniform buffers based on the current camera, and records draw calls
  *	for it into the currently recording command buffer. Must be called between
  *	vklStartRecordingCommands() and vklEndRecordingCommands().
@@ -453,6 +411,7 @@ int main(int argc, char** argv) {
     window_height = window_reader.GetInteger("window", "height", 800);
     fullscreen = window_reader.GetBoolean("window", "fullscreen", false);
     window_title = window_reader.Get("window", "title", WINDOW_TITLE);
+    int monitor_index = window_reader.GetInteger("window", "monitor_index", 0);
     std::string init_camera_filepath = "assets/settings/camera_front.ini";
     if (cmdline_args.init_camera) {
         init_camera_filepath = cmdline_args.init_camera_filepath;
@@ -513,6 +472,19 @@ int main(int argc, char** argv) {
         VKL_EXIT_WITH_ERROR("No GLFW window created.");
     }
     VKL_LOG("Subtask 1.2 done.");
+
+    // Snap the window to the top-left corner of the requested monitor (windowed mode only —
+    // fullscreen already picked its monitor above via `monitor`). monitor_index 0 (the default)
+    // leaves window placement up to the OS, unchanged from before.
+    if (!fullscreen && monitor_index > 0) {
+        int monitor_count = 0;
+        GLFWmonitor** monitors = glfwGetMonitors(&monitor_count);
+        if (monitor_index < monitor_count) {
+            int monitor_x, monitor_y;
+            glfwGetMonitorPos(monitors[monitor_index], &monitor_x, &monitor_y);
+            glfwSetWindowPos(window, monitor_x, monitor_y);
+        }
+    }
 
     VkResult result;
     VkInstance vk_instance = VK_NULL_HANDLE;              // To be set during Subtask 1.3
@@ -841,9 +813,7 @@ int main(int argc, char** argv) {
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-
-        // TODO (plan §6): build the actual GUI panel here (Hurst/Height/Water sliders, Reseed button).
-
+        buildGUI();
         ImGui::Render();
 
         // Wait until we get an image from the swapchain to render into:
@@ -1714,4 +1684,16 @@ void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
             vklDestroyGraphicsPipeline(scene.pipelines[i][j]);
         }
     }
+}
+
+void buildGUI() {
+    const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+
+    if (!ImGui::Begin("Terrain Settings", &g_panel_open, window_flags)) {
+        // Early out if the window is collapsed, as an optimization.
+        ImGui::End();
+        return;
+    }
+
+    ImGui::End();
 }
