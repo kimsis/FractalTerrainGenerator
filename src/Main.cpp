@@ -339,9 +339,7 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
  *	so the (potentially slow) CPU generation can happen elsewhere — e.g. on a background thread while
  *	a loading screen keeps the window responsive — before this is called.
  */
-TerrainScene setupTerrainScene(
-    VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, const GeometryData& terrain_geometry_data
-);
+TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, const GeometryData& terrain_geometry_data);
 
 /*!
  *	Builds a minimal ImGui panel shown while terrain is generating in the background, before the
@@ -849,6 +847,7 @@ int main(int argc, char** argv) {
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+        // ImGui::ShowDemoWindow();
         buildGUI();
         ImGui::Render();
 
@@ -1622,9 +1621,8 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
     return vklCreateGraphicsPipeline(pipeline_config);
 }
 
-TerrainScene setupTerrainScene(
-    VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, const GeometryData& terrain_geometry_data
-) {
+TerrainScene
+setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, const GeometryData& terrain_geometry_data) {
     TerrainScene scene{};
 
     /* --------------------------------------------- */

@@ -92,6 +92,7 @@ add_executable(${PROJECT_NAME}
     src/terrain/Geometry.cpp
     src/terrain/DiamondSquareGenerator.h
     src/terrain/DiamondSquareGenerator.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
     ${IMGUI_DIR}/imgui_tables.cpp
