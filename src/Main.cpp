@@ -46,6 +46,7 @@ constexpr size_t CULLMODES = 3;
 constexpr VkPolygonMode kTerrainPolygonModes[POLYMODES] = {VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE};
 constexpr VkCullModeFlags kTerrainCullModes[CULLMODES] = {VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT};
 
+static ImGuiSliderFlags flags = ImGuiSliderFlags_None;
 ImGuiWindowFlags window_flags = 0;
 bool g_panel_open = true;
 
@@ -322,8 +323,14 @@ struct TerrainScene {
     VkBuffer ub_dirlight;
 
     Geometry terrain_geometry;
+    TerrainParams terrainParams;
     VkBuffer ub_terrain;
     VkDescriptorSet ds_terrain;
+
+    // Set by the "Apply" button (see buildGUI) to kick off a background regeneration; valid() stays
+    // true from the moment generation starts until updateAndDrawTerrainScene consumes the ready
+    // result — used both to detect completion and to disable "Apply" while one is already running.
+    std::future<GeometryData> pendingTerrainGeneration;
 };
 
 /*!
@@ -339,7 +346,13 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
  *	so the (potentially slow) CPU generation can happen elsewhere — e.g. on a background thread while
  *	a loading screen keeps the window responsive — before this is called.
  */
-TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, const GeometryData& terrain_geometry_data);
+TerrainScene setupTerrainScene(
+    VkDevice vk_device,
+    VkQueue vk_queue,
+    uint32_t selected_queue_family_index,
+    const GeometryData& terrain_geometry_data,
+    TerrainParams& params
+);
 
 /*!
  *	Builds a minimal ImGui panel shown while terrain is generating in the background, before the
@@ -348,16 +361,32 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
 void buildLoadingGUI();
 
 /*!
+ *	Kicks off terrain generation for the given params on a background thread and returns immediately
+ *	with a future for the result — does not block, does not show any loading UI. Use this for silent
+ *	background regeneration (e.g. after a Hurst change), where the currently-displayed terrain should
+ *	keep rendering normally until the new one is ready to swap in.
+ */
+std::future<GeometryData> startTerrainGeneration(const TerrainParams& params);
+
+/*!
+ *	Generates terrain geometry for the given params, blocking the caller until it's done, while keeping
+ *	the window responsive (polling events and drawing a loading screen) for however long that takes.
+ *	Built on top of startTerrainGeneration — use this specifically when there's nothing else to show
+ *	yet (e.g. the very first, initial generation at startup).
+ */
+GeometryData generateTerrainGeometryWithLoadingScreen(const TerrainParams& params);
+
+/*!
  * Builds the ImGUI Sidebar
  */
-void buildGUI();
+void buildGUI(TerrainScene& scene);
 
 /*!
  *	Updates the terrain scene's uniform buffers based on the current camera, and records draw calls
  *	for it into the currently recording command buffer. Must be called between
  *	vklStartRecordingCommands() and vklEndRecordingCommands().
  */
-void updateAndDrawTerrainScene(TerrainScene& scene, const Camera& camera);
+void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera& camera);
 
 /*!
  *	Destroys all GPU resources owned by the given terrain scene.
@@ -423,7 +452,7 @@ int main(int argc, char** argv) {
     fullscreen = window_reader.GetBoolean("window", "fullscreen", false);
     window_title = window_reader.Get("window", "title", WINDOW_TITLE);
     int monitor_index = window_reader.GetInteger("window", "monitor_index", 0);
-    std::string init_camera_filepath = "assets/settings/camera_front.ini";
+    std::string init_camera_filepath = "assets/settings/camera_terrain.ini";
     if (cmdline_args.init_camera) {
         init_camera_filepath = cmdline_args.init_camera_filepath;
     }
@@ -790,29 +819,13 @@ int main(int argc, char** argv) {
     // Subtasks 2.1, 2.3, 3.5-3.7, 4.5, 5.5, 5.7: Set up the Demo Scene
     /* --------------------------------------------- */
     // Terrain generation is pure CPU work and can take a noticeable amount of time (especially in a
-    // Debug build), so it runs on a background thread here. Meanwhile the main thread keeps polling
-    // events and drawing a minimal loading screen, so the OS/window manager never sees the window as
-    // unresponsive.
+    // Debug build); generateTerrainGeometryWithLoadingScreen runs it on a background thread while
+    // keeping the window responsive, and is reused later for regeneration after param changes too.
     TerrainParams initial_terrain_params;
-    std::future<GeometryData> terrain_geometry_future = std::async(std::launch::async, generateTerrainGeometry, initial_terrain_params);
+    GeometryData initial_terrain_geometry = generateTerrainGeometryWithLoadingScreen(initial_terrain_params);
 
-    while (terrain_geometry_future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
-        glfwPollEvents();
-
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-        buildLoadingGUI();
-        ImGui::Render();
-
-        vklWaitForNextSwapchainImage();
-        vklStartRecordingCommands();
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
-        vklEndRecordingCommands();
-        vklPresentCurrentSwapchainImage();
-    }
-
-    TerrainScene terrain_scene = setupTerrainScene(vk_device, vk_queue, selected_queue_family_index, terrain_geometry_future.get());
+    TerrainScene terrain_scene =
+        setupTerrainScene(vk_device, vk_queue, selected_queue_family_index, initial_terrain_geometry, initial_terrain_params);
 
     /* --------------------------------------------- */
     // Subtask 2.6: Orbit Camera
@@ -848,14 +861,14 @@ int main(int argc, char** argv) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
         // ImGui::ShowDemoWindow();
-        buildGUI();
+        buildGUI(terrain_scene);
         ImGui::Render();
 
         // Wait until we get an image from the swapchain to render into:
         vklWaitForNextSwapchainImage();
         vklStartRecordingCommands();
 
-        updateAndDrawTerrainScene(terrain_scene, camera);
+        updateAndDrawTerrainScene(vk_device, terrain_scene, camera);
 
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
 
@@ -1621,9 +1634,15 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
     return vklCreateGraphicsPipeline(pipeline_config);
 }
 
-TerrainScene
-setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, const GeometryData& terrain_geometry_data) {
+TerrainScene setupTerrainScene(
+    VkDevice vk_device,
+    VkQueue vk_queue,
+    uint32_t selected_queue_family_index,
+    const GeometryData& terrain_geometry_data,
+    TerrainParams& params
+) {
     TerrainScene scene{};
+    scene.terrainParams = params;
 
     /* --------------------------------------------- */
     // Subtask 2.1: Create a Custom Graphics Pipeline
@@ -1684,7 +1703,17 @@ setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_
     return scene;
 }
 
-void updateAndDrawTerrainScene(TerrainScene& scene, const Camera& camera) {
+void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera& camera) {
+    if (scene.pendingTerrainGeneration.valid() &&
+        scene.pendingTerrainGeneration.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+        GeometryData new_terrain_geometry_data = scene.pendingTerrainGeneration.get();
+        // The old buffers might still be in use by an in-flight frame — wait for the GPU to be idle
+        // before destroying/replacing them.
+        vkDeviceWaitIdle(vk_device);
+        destroyGeometryGpuMemory(scene.terrain_geometry);
+        scene.terrain_geometry = createAndUploadIntoGpuMemory(new_terrain_geometry_data);
+    }
+
     UniformBuffer ub_data;
     ub_data.userInput[0] = g_draw_normals ? 1 : 0;
     ub_data.userInput[1] = g_draw_fresnel ? 1 : 0;
@@ -1733,13 +1762,54 @@ void buildLoadingGUI() {
     ImGui::End();
 }
 
-void buildGUI() {
+std::future<GeometryData> startTerrainGeneration(const TerrainParams& params) {
+    return std::async(std::launch::async, generateTerrainGeometry, params);
+}
+
+GeometryData generateTerrainGeometryWithLoadingScreen(const TerrainParams& params) {
+    std::future<GeometryData> terrain_geometry_future = startTerrainGeneration(params);
+
+    while (terrain_geometry_future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+        glfwPollEvents();
+
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        buildLoadingGUI();
+        ImGui::Render();
+
+        vklWaitForNextSwapchainImage();
+        vklStartRecordingCommands();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
+        vklEndRecordingCommands();
+        vklPresentCurrentSwapchainImage();
+    }
+
+    return terrain_geometry_future.get();
+}
+
+void buildGUI(TerrainScene& scene) {
     const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
 
     if (!ImGui::Begin("Terrain Settings", &g_panel_open, window_flags)) {
         // Early out if the window is collapsed, as an optimization.
         ImGui::End();
         return;
+    }
+
+    const ImGuiSliderFlags flags_for_sliders = (flags & ~ImGuiSliderFlags_WrapAround);
+    ImGui::Text("Hurst exponent: %f", scene.terrainParams.hurst);
+    ImGui::SliderFloat("SliderFloat (0 -> 1)", &scene.terrainParams.hurst, 0.0f, 1.0f, "%.3f", flags_for_sliders);
+
+    bool generation_in_progress = scene.pendingTerrainGeneration.valid();
+    ImGui::BeginDisabled(generation_in_progress);
+    if (ImGui::Button("Apply")) {
+        scene.pendingTerrainGeneration = startTerrainGeneration(scene.terrainParams);
+    }
+    ImGui::EndDisabled();
+    if (generation_in_progress) {
+        ImGui::SameLine();
+        ImGui::Text("Generating...");
     }
 
     ImGui::End();
