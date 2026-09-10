@@ -90,6 +90,8 @@ constexpr float SPHERE_ALPHA = 8.0f;
 
 constexpr size_t POLYMODES = 2;
 constexpr size_t CULLMODES = 3;
+constexpr VkPolygonMode kTerrainPolygonModes[POLYMODES] = {VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE};
+constexpr VkCullModeFlags kTerrainCullModes[CULLMODES] = {VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT};
 
 /* --------------------------------------------- */
 // Helper Function Declarations
@@ -354,7 +356,12 @@ ImageAndView loadImage(VkDevice device, VkQueue queue, VkCommandPool command_poo
 struct TerrainScene {
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
+    // Pipelines are built lazily, on first use of a given (polygon mode, cull mode) combination —
+    // see buildTerrainPipeline(...) — so most of these start out (and often stay) VK_NULL_HANDLE.
     VkPipeline pipelines[POLYMODES][CULLMODES];
+    std::string vertexShaderPath;
+    std::string fragmentShaderPath;
+    std::vector<VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings;
 
     VkBuffer ub_dirlight;
 
@@ -362,6 +369,13 @@ struct TerrainScene {
     VkBuffer ub_terrain;
     VkDescriptorSet ds_terrain;
 };
+
+/*!
+ *	Builds (compiles + creates) the terrain pipeline for one (polygon mode, cull mode) combination,
+ *	identified by their indices into kTerrainPolygonModes/kTerrainCullModes. Shader compilation isn't
+ *	cached by the framework, so this is deliberately only called once per combination, on demand.
+ */
+VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_index, size_t cull_mode_index);
 
 /*!
  *	Creates every pipeline, geometry, uniform buffer, descriptor set, and texture that the terrain
@@ -1577,51 +1591,50 @@ ImageAndView loadImage(VkDevice device, VkQueue queue, VkCommandPool command_poo
 // Demo Scene (safe to remove; comment out its call sites in main() to drop it)
 /* --------------------------------------------- */
 
+VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_index, size_t cull_mode_index) {
+    VklGraphicsPipelineConfig pipeline_config{
+        scene.vertexShaderPath.c_str(),
+        scene.fragmentShaderPath.c_str(),
+        {
+            VkVertexInputBindingDescription{0u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
+            VkVertexInputBindingDescription{1u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
+        },
+        {
+            VkVertexInputAttributeDescription{0u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
+            VkVertexInputAttributeDescription{1u, 1u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
+        },
+        /* --------------------------------------------- */
+        // Subtask 3.1: Wireframe Mode
+        /* --------------------------------------------- */
+        kTerrainPolygonModes[polygon_mode_index],
+        /* --------------------------------------------- */
+        // Subtask 3.2: Back-face Culling
+        /* --------------------------------------------- */
+        kTerrainCullModes[cull_mode_index],
+        scene.descriptorSetLayoutBindings,
+    };
+    return vklCreateGraphicsPipeline(pipeline_config);
+}
+
 TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index) {
     TerrainScene scene{};
 
     /* --------------------------------------------- */
     // Subtask 2.1: Create a Custom Graphics Pipeline
     /* --------------------------------------------- */
-    std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings = {
+    scene.descriptorSetLayoutBindings = {
         VkDescriptorSetLayoutBinding{0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
         VkDescriptorSetLayoutBinding{1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
     };
+    scene.vertexShaderPath = gcgFindShaderFile("assets/shaders/terrain.vert");
+    scene.fragmentShaderPath = gcgFindShaderFile("assets/shaders/terrain.frag");
 
     /* --------------------------------------------- */
     // Subtask 3.3: Interaction
     /* --------------------------------------------- */
-    VkPolygonMode polygon_modes[POLYMODES] = {VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE};
-    VkCullModeFlags cull_modes[CULLMODES] = {VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT};
-    // prepare terrain pipelines
-    std::string vertexShaderPath = gcgFindShaderFile("assets/shaders/terrain.vert");
-    std::string fragmentShaderPath = gcgFindShaderFile("assets/shaders/terrain.frag");
-    for (size_t i = 0; i < POLYMODES; ++i) {
-        for (size_t j = 0; j < CULLMODES; ++j) {
-            VklGraphicsPipelineConfig pipeline_config{
-                vertexShaderPath.c_str(),
-                fragmentShaderPath.c_str(),
-                {
-                    VkVertexInputBindingDescription{0u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
-                    VkVertexInputBindingDescription{1u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
-                },
-                {
-                    VkVertexInputAttributeDescription{0u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
-                    VkVertexInputAttributeDescription{1u, 1u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
-                },
-                /* --------------------------------------------- */
-                // Subtask 3.1: Wireframe Mode
-                /* --------------------------------------------- */
-                polygon_modes[i],
-                /* --------------------------------------------- */
-                // Subtask 3.2: Back-face Culling
-                /* --------------------------------------------- */
-                cull_modes[j],
-                descriptor_set_layout_bindings,
-            };
-            scene.pipelines[i][j] = vklCreateGraphicsPipeline(pipeline_config);
-        }
-    }
+    // Pipelines are built lazily (see buildTerrainPipeline) — only the initially-selected combination
+    // is built up front, so startup doesn't pay for all POLYMODES*CULLMODES shader compiles at once.
+    scene.pipelines[g_polygon_mode_index][g_culling_index] = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
 
     /* --------------------------------------------- */
     // Subtask 2.3: Allocate and Write Descriptors
@@ -1640,8 +1653,8 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
     VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {};
     descriptor_set_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     // We can reuse the same layout description that we have passed to graphics pipeline creation:
-    descriptor_set_layout_create_info.bindingCount = static_cast<uint32_t>(descriptor_set_layout_bindings.size());
-    descriptor_set_layout_create_info.pBindings = descriptor_set_layout_bindings.data();
+    descriptor_set_layout_create_info.bindingCount = static_cast<uint32_t>(scene.descriptorSetLayoutBindings.size());
+    descriptor_set_layout_create_info.pBindings = scene.descriptorSetLayoutBindings.data();
 
     result = vkCreateDescriptorSetLayout(vk_device, &descriptor_set_layout_create_info, nullptr, &scene.descriptor_set_layout);
     VKL_CHECK_VULKAN_RESULT(result);
@@ -1680,7 +1693,12 @@ void updateAndDrawTerrainScene(TerrainScene& scene, const Camera& camera) {
     ub_data.materialProperties = {CORNELL_KA, CORNELL_KD, CORNELL_KS, CORNELL_ALPHA};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain, &ub_data, sizeof(UniformBuffer));
 
-    VkPipeline selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
+    VkPipeline& selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
+    if (selected_pipeline == VK_NULL_HANDLE) {
+        // First time this (polygon mode, cull mode) combination has been selected: build it now,
+        // and it'll be reused from here on instead of being rebuilt every frame.
+        selected_pipeline = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
+    }
     drawGeometryWithMaterial(selected_pipeline, scene.terrain_geometry, scene.ds_terrain);
 }
 
