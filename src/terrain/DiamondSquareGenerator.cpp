@@ -12,9 +12,9 @@ DiamondSquareGenerator::DiamondSquareGenerator(const TerrainParams& newParams) {
 
 void DiamondSquareGenerator::ComputeTerrain() {
     size = (1 << params.gridSizeExponent) + 1;
-    heights.assign(size * size, 0.0f);
-    normals.assign(size * size, glm::vec3(0.0f));
-    positions.assign(size * size, glm::vec3(0.0f));
+    heights.resize(size * size);
+    normals.resize(size * size);
+    positions.resize(size * size);
     GenerateHeightMap();
     GeneratePositions();
     DerriveNormals();

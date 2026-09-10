@@ -17,7 +17,6 @@ GeometryData generateTerrainGeometry(const TerrainParams& params) {
     GeometryData data;
     DiamondSquareGenerator generator = DiamondSquareGenerator();
     generator.SetParams(params);
-    generator.ComputeTerrain();
 
     data.positions = generator.getPositions();
 
