@@ -4,7 +4,7 @@
 #include <vector>
 
 struct TerrainParams {
-    int gridSizeExponent = 11; // gridSize = 2^gridSizeExponent + 1
+    int gridSizeExponent = 9; // gridSize = 2^gridSizeExponent + 1
     float hurst = 0.6f;
     uint32_t seed = 1337u;
     float initialVariance = 1.0f;

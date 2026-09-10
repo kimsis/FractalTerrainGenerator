@@ -12,10 +12,10 @@
 #include <vector>
 
 #include "Camera.h"
-#include "DiamondSquareGenerator.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
+#include "terrain/DiamondSquareGenerator.h"
 #include "terrain/Geometry.h"
 #include "utils/PathUtils.h"
 #include "utils/Utils.h"
@@ -195,9 +195,6 @@ VkSurfaceTransformFlagBitsKHR getSurfaceTransform(VkPhysicalDevice physical_devi
  *	It matches the definition and sizes of the corresponding GPU-side struct exactly, which is used in shaders.
  */
 struct UniformBuffer {
-    /*! A color values, stored as four floats, to properly align to 16 byte boundaries. */
-    glm::vec4 color;
-
     /*! Storage for the model matrix, consisting of 16 float values (inherently aligned to 16 bytes) */
     glm::mat4 modelMatrix;
 
@@ -1332,15 +1329,9 @@ void drawGeometryWithMaterial(VkPipeline pipeline, const Geometry& geometry, VkD
 
     // Record the draw call into the command buffer, which uses vertex and index buffers of the geometry:
     vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    if (VK_NULL_HANDLE == geometry.colorsBuffer) {
-        VkBuffer vertex_buffers[3] = {geometry.positionsBuffer, geometry.normalsBuffer, geometry.textureCoordinatesBuffer};
-        VkDeviceSize offsets[3] = {0, 0, 0};
-        vkCmdBindVertexBuffers(cb, 0u, 3u, vertex_buffers, offsets);
-    } else {
-        VkBuffer vertex_buffers[3] = {geometry.positionsBuffer, geometry.normalsBuffer, geometry.colorsBuffer};
-        VkDeviceSize offsets[3] = {0, 0, 0};
-        vkCmdBindVertexBuffers(cb, 0u, 3u, vertex_buffers, offsets);
-    }
+    VkBuffer vertex_buffers[2] = {geometry.positionsBuffer, geometry.normalsBuffer};
+    VkDeviceSize offsets[2] = {0, 0};
+    vkCmdBindVertexBuffers(cb, 0u, 2u, vertex_buffers, offsets);
 
     vkCmdBindIndexBuffer(cb, geometry.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cb, geometry.numberOfIndices, num_instances, 0u, 0u, 0u);
@@ -1594,7 +1585,7 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
     /* --------------------------------------------- */
     std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings = {
         VkDescriptorSetLayoutBinding{0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-        VkDescriptorSetLayoutBinding{1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+        VkDescriptorSetLayoutBinding{1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
     };
 
     /* --------------------------------------------- */
@@ -1603,8 +1594,8 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
     VkPolygonMode polygon_modes[POLYMODES] = {VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE};
     VkCullModeFlags cull_modes[CULLMODES] = {VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT};
     // prepare terrain pipelines
-    std::string vertexShaderPath = gcgFindShaderFile("assets/shaders/terrainGouraud.vert");
-    std::string fragmentShaderPath = gcgFindShaderFile("assets/shaders/terrainGouraud.frag");
+    std::string vertexShaderPath = gcgFindShaderFile("assets/shaders/terrain.vert");
+    std::string fragmentShaderPath = gcgFindShaderFile("assets/shaders/terrain.frag");
     for (size_t i = 0; i < POLYMODES; ++i) {
         for (size_t j = 0; j < CULLMODES; ++j) {
             VklGraphicsPipelineConfig pipeline_config{
@@ -1613,12 +1604,10 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
                 {
                     VkVertexInputBindingDescription{0u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
                     VkVertexInputBindingDescription{1u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
-                    VkVertexInputBindingDescription{2u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
                 },
                 {
                     VkVertexInputAttributeDescription{0u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
                     VkVertexInputAttributeDescription{1u, 1u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
-                    VkVertexInputAttributeDescription{2u, 2u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
                 },
                 /* --------------------------------------------- */
                 // Subtask 3.1: Wireframe Mode
@@ -1686,9 +1675,6 @@ void updateAndDrawTerrainScene(TerrainScene& scene, const Camera& camera) {
     // View-projection matrix and camera's position stay the same for all rendered objects:
     ub_data.viewProjMatrix = camera.getViewProjectionMatrix();
     ub_data.cameraPosition = glm::vec4{camera.getPosition(), 1.0f};
-    ub_data.color = {1.f, 1.f, 1.f, 1.f};
-    // Update terrain:
-    ub_data.color = {0.7f, 0.1f, 0.2f, 1.0f};
     ub_data.modelMatrix = glm::mat4{1.0f};
     ub_data.modelMatrixForNormals = glm::mat4{1.0f};
     ub_data.materialProperties = {CORNELL_KA, CORNELL_KD, CORNELL_KS, CORNELL_ALPHA};

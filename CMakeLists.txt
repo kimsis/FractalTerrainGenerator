@@ -83,12 +83,15 @@ set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/imgui")
 #================================#
 add_executable(${PROJECT_NAME}
     src/Main.cpp
-    src/VulkanHelpers.h
-    src/VulkanHelpers.cpp
-    src/Geometry.h
-    src/Geometry.cpp
-    src/Utils.h
     src/Camera.h
+    src/utils/VulkanHelpers.h
+    src/utils/VulkanHelpers.cpp
+    src/utils/Utils.h
+    src/utils/MathUtils.h
+    src/terrain/Geometry.h
+    src/terrain/Geometry.cpp
+    src/terrain/DiamondSquareGenerator.h
+    src/terrain/DiamondSquareGenerator.cpp
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
     ${IMGUI_DIR}/imgui_tables.cpp
