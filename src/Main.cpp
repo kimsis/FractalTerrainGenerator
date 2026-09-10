@@ -8,6 +8,9 @@
 #include <vulkan/vulkan.h>
 
 #include <array>
+#include <chrono>
+#include <future>
+#include <iostream>
 #include <sstream>
 #include <vector>
 
@@ -332,9 +335,19 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
 
 /*!
  *	Creates every pipeline, geometry, uniform buffer, descriptor set, and texture that the terrain
- *	scene consists of.
+ *	scene consists of. Takes already-generated terrain geometry data rather than generating it itself,
+ *	so the (potentially slow) CPU generation can happen elsewhere — e.g. on a background thread while
+ *	a loading screen keeps the window responsive — before this is called.
  */
-TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index);
+TerrainScene setupTerrainScene(
+    VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, const GeometryData& terrain_geometry_data
+);
+
+/*!
+ *	Builds a minimal ImGui panel shown while terrain is generating in the background, before the
+ *	real terrain scene (and its controls) exist yet.
+ */
+void buildLoadingGUI();
 
 /*!
  * Builds the ImGUI Sidebar
@@ -778,7 +791,30 @@ int main(int argc, char** argv) {
     /* --------------------------------------------- */
     // Subtasks 2.1, 2.3, 3.5-3.7, 4.5, 5.5, 5.7: Set up the Demo Scene
     /* --------------------------------------------- */
-    TerrainScene terrain_scene = setupTerrainScene(vk_device, vk_queue, selected_queue_family_index);
+    // Terrain generation is pure CPU work and can take a noticeable amount of time (especially in a
+    // Debug build), so it runs on a background thread here. Meanwhile the main thread keeps polling
+    // events and drawing a minimal loading screen, so the OS/window manager never sees the window as
+    // unresponsive.
+    TerrainParams initial_terrain_params;
+    std::future<GeometryData> terrain_geometry_future = std::async(std::launch::async, generateTerrainGeometry, initial_terrain_params);
+
+    while (terrain_geometry_future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+        glfwPollEvents();
+
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        buildLoadingGUI();
+        ImGui::Render();
+
+        vklWaitForNextSwapchainImage();
+        vklStartRecordingCommands();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
+        vklEndRecordingCommands();
+        vklPresentCurrentSwapchainImage();
+    }
+
+    TerrainScene terrain_scene = setupTerrainScene(vk_device, vk_queue, selected_queue_family_index, terrain_geometry_future.get());
 
     /* --------------------------------------------- */
     // Subtask 2.6: Orbit Camera
@@ -1586,7 +1622,9 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
     return vklCreateGraphicsPipeline(pipeline_config);
 }
 
-TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index) {
+TerrainScene setupTerrainScene(
+    VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, const GeometryData& terrain_geometry_data
+) {
     TerrainScene scene{};
 
     /* --------------------------------------------- */
@@ -1638,9 +1676,8 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
     DirectionalLight directional_light = {DIRLIGHT_COLOR, glm::normalize(DIRLIGHT_DIR)};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_dirlight, &directional_light, sizeof(DirectionalLight));
 
-    TerrainParams params;
     // terrain geometry and material
-    scene.terrain_geometry = createAndUploadIntoGpuMemory(generateTerrainGeometry(params));
+    scene.terrain_geometry = createAndUploadIntoGpuMemory(terrain_geometry_data);
     scene.ub_terrain =
         vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     scene.ds_terrain = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
@@ -1684,6 +1721,18 @@ void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
             vklDestroyGraphicsPipeline(scene.pipelines[i][j]);
         }
     }
+}
+
+void buildLoadingGUI() {
+    const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(main_viewport->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::Begin(
+        "Loading",
+        nullptr,
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove
+    );
+    ImGui::Text("Generating terrain...");
+    ImGui::End();
 }
 
 void buildGUI() {
