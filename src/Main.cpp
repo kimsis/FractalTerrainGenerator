@@ -158,7 +158,7 @@ VkSurfaceTransformFlagBitsKHR getSurfaceTransform(VkPhysicalDevice physical_devi
 /*!
  *	It matches the definition and sizes of the corresponding GPU-side struct exactly, which is used in shaders.
  */
-struct UniformBuffer {
+struct UniformBufferVert {
     /*! Storage for the model matrix, consisting of 16 float values (inherently aligned to 16 bytes) */
     glm::mat4 modelMatrix;
 
@@ -168,6 +168,11 @@ struct UniformBuffer {
     /*! Storage for the view-projection matrix, consisting of 16 float values (inherently aligned to 16 bytes) */
     glm::mat4 viewProjMatrix;
 
+    /*! 0-1 float for the smooth transition between hurst/seed changes */
+    float blendFactor;
+};
+
+struct UniformBufferFrag {
     /*! Storage for the camera's world space position (aligned to 16 bytes) */
     glm::vec4 cameraPosition;
 
@@ -216,54 +221,27 @@ struct PointLight {
 VkDescriptorSet allocDescriptorSet(VkDevice device, VkDescriptorPool descriptor_pool, VkDescriptorSetLayout descriptor_set_layout);
 
 /*!
- *	Writes the descriptor information to a given descriptor set which describes one uniform buffer at binding = 0.
+ *	Writes the descriptor information to a given descriptor set which describes one uniform buffer at
+ *	binding = 0 and another uniform buffer at binding = 1 — the two bindings every terrain material
+ *	descriptor set always needs (its vertex-stage and fragment-stage uniform buffers).
  *	The given descriptor set must have been created from a descriptor set layout according to this structure.
- *	@param	device					Valid handle to the logical device
- *	@param	descriptor_set			Valid handle to a descriptor set, which concrete descriptor information will be written to.
- *	@param	uniform_buffer			A descriptor for this uniform buffer will be written to binding = 0
+ *	@param	device				Valid handle to the logical device
+ *	@param	descriptor_set		Valid handle to a descriptor set, which concrete descriptor information will be written to.
+ *	@param	vert_buffer		A descriptor for this uniform buffer will be written to binding = 0
+ *	@param	frag_buffer		A descriptor for this uniform buffer will be written to binding = 1
  */
-void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer uniform_buffer);
+void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer vert_buffer, VkBuffer frag_buffer);
 
 /*!
- *	Writes the descriptor information to a given descriptor set which describes one uniform buffer at binding = 0,
- *	another uniform buffer at binding = 1, and yet another uniform buffer at binding = 2.
- *	The given descriptor set must have been created from a descriptor set layout according to this structure.
- *	@param	device					Valid handle to the logical device
- *	@param	descriptor_set			Valid handle to a descriptor set, which concrete descriptor information will be written to.
- *	@param	object_data				A descriptor for this uniform buffer will be written to binding = 0
- *	@param	directional_light_data	A descriptor for this uniform buffer will be written to binding = 1
- *	@param	point_light_data		A descriptor for this uniform buffer will be written to binding = 2
+ *	As the two-buffer overload above, plus a third, optional uniform buffer written to binding = 2 —
+ *	for the terrain material, this is the directional light data.
+ *	@param	device				Valid handle to the logical device
+ *	@param	descriptor_set		Valid handle to a descriptor set, which concrete descriptor information will be written to.
+ *	@param	vert_buffer		A descriptor for this uniform buffer will be written to binding = 0
+ *	@param	frag_buffer		A descriptor for this uniform buffer will be written to binding = 1
+ *	@param	directional_light_data		A descriptor for this uniform buffer will be written to binding = 2
  */
-void writeDescriptorSet(
-    VkDevice device,
-    VkDescriptorSet descriptor_set,
-    VkBuffer object_data,
-    VkBuffer directional_light_data,
-    VkBuffer point_light_data
-);
-
-/*!
- *	Writes the descriptor information to a given descriptor set which describes one uniform buffer at binding = 0,
- *	another uniform buffer at binding = 1, and yet another uniform buffer at binding = 2, furthermore,
- *	a combined image sampler descriptor is written for binding = 3
- *	The given descriptor set must have been created from a descriptor set layout according to this structure.
- *	@param	device					Valid handle to the logical device
- *	@param	descriptor_set			Valid handle to a descriptor set, which concrete descriptor information will be written to.
- *	@param	object_data				A descriptor for this uniform buffer will be written to binding = 0
- *	@param	directional_light_data	A descriptor for this uniform buffer will be written to binding = 1
- *	@param	point_light_data		A descriptor for this uniform buffer will be written to binding = 2
- *	@param	image_view				A combined descriptor together with sampler will be written to binding = 3
- *	@param	sampler					A combined descriptor together with image_view will be written to binding = 3
- */
-void writeDescriptorSet(
-    VkDevice device,
-    VkDescriptorSet descriptor_set,
-    VkBuffer object_data,
-    VkBuffer directional_light_data,
-    VkBuffer point_light_data,
-    VkImageView image_view,
-    VkSampler sampler
-);
+void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer vert_buffer, VkBuffer frag_buffer, VkBuffer directional_light_data);
 
 /*!
  *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
@@ -327,7 +305,8 @@ struct TerrainScene {
 
     VkBuffer ub_dirlight;
 
-    VkBuffer ub_terrain;
+    VkBuffer ub_terrain_vert;
+    VkBuffer ub_terrain_frag;
     VkDescriptorSet ds_terrain;
     Geometry terrain_geometry;
     TerrainParams terrainParams;
@@ -1231,50 +1210,30 @@ VkDescriptorSet allocDescriptorSet(VkDevice device, VkDescriptorPool descriptor_
     return descriptor_set;
 }
 
-void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer uniform_buffer) {
-    // Prepare write info and write:
-    VkDescriptorBufferInfo descriptor_buffer_info = {};
-    descriptor_buffer_info.buffer = uniform_buffer;
-    descriptor_buffer_info.offset = static_cast<VkDeviceSize>(0);
-    descriptor_buffer_info.range = VK_WHOLE_SIZE;
+void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer vert_buffer, VkBuffer frag_buffer) {
+    VkDescriptorBufferInfo vert_descriptor_buffer_info = {};
+    vert_descriptor_buffer_info.buffer = vert_buffer;
+    vert_descriptor_buffer_info.offset = static_cast<VkDeviceSize>(0);
+    vert_descriptor_buffer_info.range = VK_WHOLE_SIZE;
 
-    VkWriteDescriptorSet write_descriptor_set = {};
-    write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write_descriptor_set.dstSet = descriptor_set;
-    write_descriptor_set.dstBinding = 0u;
-    write_descriptor_set.dstArrayElement = 0u;
-    write_descriptor_set.descriptorCount = 1u;
-    write_descriptor_set.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    write_descriptor_set.pBufferInfo = &descriptor_buffer_info;
-
-    vkUpdateDescriptorSets(device, 1u, &write_descriptor_set, 0u, nullptr);
-}
-
-void writeDescriptorSet(
-    VkDevice device,
-    VkDescriptorSet descriptor_set,
-    VkBuffer object_data,
-    VkBuffer directional_light_data,
-    VkBuffer point_light_data
-) {
-    // Write object data descriptor first:
-    writeDescriptorSet(device, descriptor_set, object_data);
-
-    // Then write the rest:
-
-    // Prepare info about directional light data:
-    VkDescriptorBufferInfo dirlight_buffer_info = {};
-    dirlight_buffer_info.buffer = directional_light_data;
-    dirlight_buffer_info.offset = static_cast<VkDeviceSize>(0);
-    dirlight_buffer_info.range = VK_WHOLE_SIZE;
-
-    // Prepare info about point light data:
-    VkDescriptorBufferInfo pointlight_buffer_info = {};
-    pointlight_buffer_info.buffer = point_light_data;
-    pointlight_buffer_info.offset = static_cast<VkDeviceSize>(0);
-    pointlight_buffer_info.range = VK_WHOLE_SIZE;
+    VkDescriptorBufferInfo frag_descriptor_buffer_info = {};
+    frag_descriptor_buffer_info.buffer = frag_buffer;
+    frag_descriptor_buffer_info.offset = static_cast<VkDeviceSize>(0);
+    frag_descriptor_buffer_info.range = VK_WHOLE_SIZE;
 
     std::vector<VkWriteDescriptorSet> writes = {
+        VkWriteDescriptorSet{
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            nullptr,
+            descriptor_set,
+            /* dstBinding: */ 0u,
+            0u,
+            1u,
+            /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            nullptr,
+            /* pBufferInfo: */ &vert_descriptor_buffer_info,
+            nullptr
+        },
         VkWriteDescriptorSet{
             VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             nullptr,
@@ -1284,19 +1243,7 @@ void writeDescriptorSet(
             1u,
             /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             nullptr,
-            /* pBufferInfo: */ &dirlight_buffer_info,
-            nullptr
-        },
-        VkWriteDescriptorSet{
-            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            nullptr,
-            descriptor_set,
-            /* dstBinding: */ 2u,
-            0u,
-            1u,
-            /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            nullptr,
-            /* pBufferInfo: */ &pointlight_buffer_info,
+            /* pBufferInfo: */ &frag_descriptor_buffer_info,
             nullptr
         },
     };
@@ -1304,13 +1251,11 @@ void writeDescriptorSet(
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
 }
 
-void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer object_data, VkBuffer directional_light_data) {
-    // Write object data descriptor first:
-    writeDescriptorSet(device, descriptor_set, object_data);
+void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer vert_buffer, VkBuffer frag_buffer, VkBuffer directional_light_data) {
+    // Write the two always-needed bindings first:
+    writeDescriptorSet(device, descriptor_set, vert_buffer, frag_buffer);
 
-    // Then write the rest:
-
-    // Prepare info about directional light data:
+    // Then write the extra one:
     VkDescriptorBufferInfo dirlight_buffer_info = {};
     dirlight_buffer_info.buffer = directional_light_data;
     dirlight_buffer_info.offset = static_cast<VkDeviceSize>(0);
@@ -1320,51 +1265,12 @@ void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffe
         VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
         nullptr,
         descriptor_set,
-        /* dstBinding: */ 1u,
+        /* dstBinding: */ 2u,
         0u,
         1u,
         /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         nullptr,
         /* pBufferInfo: */ &dirlight_buffer_info,
-        nullptr
-    }};
-
-    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
-}
-
-void writeDescriptorSet(
-    VkDevice device,
-    VkDescriptorSet descriptor_set,
-    VkBuffer object_data,
-    VkBuffer directional_light_data,
-    VkBuffer point_light_data,
-    VkImageView image_view,
-    VkSampler sampler
-) {
-    // Write object data, and light source dat first:
-    writeDescriptorSet(device, descriptor_set, object_data, directional_light_data, point_light_data);
-
-    // Then write the rest:
-
-    // Prepare info about the texture:
-    VkDescriptorImageInfo texture_info = {};
-    texture_info.imageView = image_view;
-    texture_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    texture_info.sampler = sampler;
-
-    /* --------------------------------------------- */
-    // Subtask 5.8: Use the Textures in Shaders
-    /* --------------------------------------------- */
-    std::vector<VkWriteDescriptorSet> writes = {VkWriteDescriptorSet{
-        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        nullptr,
-        descriptor_set,
-        /* dstBinding: */ 3u,
-        0u,
-        1u,
-        /* descriptorType: */ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        /* pImageInfo: */ &texture_info,
-        nullptr,
         nullptr
     }};
 
@@ -1385,9 +1291,9 @@ void drawGeometryWithMaterial(VkPipeline pipeline, const Geometry& geometry, VkD
 
     // Record the draw call into the command buffer, which uses vertex and index buffers of the geometry:
     vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    VkBuffer vertex_buffers[2] = {geometry.positionsBuffer, geometry.normalsBuffer};
-    VkDeviceSize offsets[2] = {0, 0};
-    vkCmdBindVertexBuffers(cb, 0u, 2u, vertex_buffers, offsets);
+    VkBuffer vertex_buffers[4] = {geometry.positionsFromBuffer, geometry.positionsToBuffer, geometry.normalsFromBuffer, geometry.normalsToBuffer};
+    VkDeviceSize offsets[4] = {0, 0, 0, 0};
+    vkCmdBindVertexBuffers(cb, 0u, 4u, vertex_buffers, offsets);
 
     vkCmdBindIndexBuffer(cb, geometry.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cb, geometry.numberOfIndices, num_instances, 0u, 0u, 0u);
@@ -1640,10 +1546,14 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
         {
             VkVertexInputBindingDescription{0u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
             VkVertexInputBindingDescription{1u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
+            VkVertexInputBindingDescription{2u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
+            VkVertexInputBindingDescription{3u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
         },
         {
             VkVertexInputAttributeDescription{0u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
             VkVertexInputAttributeDescription{1u, 1u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
+            VkVertexInputAttributeDescription{2u, 2u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
+            VkVertexInputAttributeDescription{3u, 3u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
         },
         /* --------------------------------------------- */
         // Subtask 3.1: Wireframe Mode
@@ -1674,8 +1584,9 @@ TerrainScene setupTerrainScene(
     // Subtask 2.1: Create a Custom Graphics Pipeline
     /* --------------------------------------------- */
     scene.descriptorSetLayoutBindings = {
-        VkDescriptorSetLayoutBinding{0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+        VkDescriptorSetLayoutBinding{0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT, nullptr},
         VkDescriptorSetLayoutBinding{1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+        VkDescriptorSetLayoutBinding{2u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
     };
     scene.vertexShaderPath = gcgFindShaderFile("assets/shaders/terrain.vert");
     scene.fragmentShaderPath = gcgFindShaderFile("assets/shaders/terrain.frag");
@@ -1690,7 +1601,7 @@ TerrainScene setupTerrainScene(
     /* --------------------------------------------- */
     // Subtask 2.3: Allocate and Write Descriptors
     /* --------------------------------------------- */
-    std::vector<VkDescriptorPoolSize> pool_sizes{VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2u}};
+    std::vector<VkDescriptorPoolSize> pool_sizes{VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3u}};
 
     VkDescriptorPoolCreateInfo descriptor_pool_create_info = {};
     descriptor_pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1721,10 +1632,16 @@ TerrainScene setupTerrainScene(
 
     // terrain geometry and material
     scene.terrain_geometry = createAndUploadIntoGpuMemory(terrain_geometry_data);
-    scene.ub_terrain =
-        vklCreateHostCoherentBufferWithBackingMemory(sizeof(UniformBuffer), VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    scene.ub_terrain_vert = vklCreateHostCoherentBufferWithBackingMemory(
+        sizeof(UniformBufferVert),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+    );
+    scene.ub_terrain_frag = vklCreateHostCoherentBufferWithBackingMemory(
+        sizeof(UniformBufferFrag),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+    );
     scene.ds_terrain = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
-    writeDescriptorSet(vk_device, scene.ds_terrain, scene.ub_terrain, scene.ub_dirlight);
+    writeDescriptorSet(vk_device, scene.ds_terrain, scene.ub_terrain_vert, scene.ub_terrain_frag, scene.ub_dirlight);
 
     return scene;
 }
@@ -1740,18 +1657,20 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
         scene.terrain_geometry = createAndUploadIntoGpuMemory(new_terrain_geometry_data);
     }
 
-    UniformBuffer ub_data;
-    ub_data.userInput[0] = g_draw_normals ? 1 : 0;
-    ub_data.userInput[1] = g_draw_fresnel ? 1 : 0;
-    ub_data.userInput[2] = g_draw_texcoords ? 1 : 0;
+    UniformBufferVert ub_vert_data;
+    ub_vert_data.modelMatrix = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, scene.heightScale));
+    ub_vert_data.modelMatrixForNormals = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, 1 / scene.heightScale));
+    ub_vert_data.viewProjMatrix = camera.getViewProjectionMatrix();
+    ub_vert_data.blendFactor = 0.0f;
+    vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_vert, &ub_vert_data, sizeof(UniformBufferVert));
 
-    // View-projection matrix and camera's position stay the same for all rendered objects:
-    ub_data.viewProjMatrix = camera.getViewProjectionMatrix();
-    ub_data.cameraPosition = glm::vec4{camera.getPosition(), 1.0f};
-    ub_data.modelMatrix = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, scene.heightScale));
-    ub_data.modelMatrixForNormals = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, 1 / scene.heightScale));
-    ub_data.materialProperties = {CORNELL_KA, CORNELL_KD, CORNELL_KS, CORNELL_ALPHA};
-    vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain, &ub_data, sizeof(UniformBuffer));
+    UniformBufferFrag ub_frag_data;
+    ub_frag_data.cameraPosition = glm::vec4{camera.getPosition(), 1.0f};
+    ub_frag_data.materialProperties = {CORNELL_KA, CORNELL_KD, CORNELL_KS, CORNELL_ALPHA};
+    ub_frag_data.userInput[0] = g_draw_normals ? 1 : 0;
+    ub_frag_data.userInput[1] = g_draw_fresnel ? 1 : 0;
+    ub_frag_data.userInput[2] = g_draw_texcoords ? 1 : 0;
+    vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_frag, &ub_frag_data, sizeof(UniformBufferFrag));
 
     VkPipeline& selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
     if (selected_pipeline == VK_NULL_HANDLE) {
@@ -1765,7 +1684,8 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
 void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
     vkDestroyDescriptorSetLayout(vk_device, scene.descriptor_set_layout, nullptr);
     vkDestroyDescriptorPool(vk_device, scene.descriptor_pool, nullptr);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain_vert);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain_frag);
     destroyGeometryGpuMemory(scene.terrain_geometry);
     vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_dirlight);
 

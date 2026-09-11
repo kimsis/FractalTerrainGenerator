@@ -6,16 +6,13 @@ layout (location = 0) in VertexData {
 	vec3 normal_world;
 } frag_in;
 
-layout (binding = 0) uniform UniformBuffer {
-	mat4 modelMatrix;
-	mat4 modelMatrixForNormals;
-	mat4 viewProjMatrix;
+layout (binding = 1) uniform UniformBufferFrag {
 	vec4 cameraPosition;
 	vec4 materialProperties; // ka, kd, ks, alpha
 	ivec4 userInput;
 } ub_data;
 
-layout (binding = 1) uniform DirectionalLight {
+layout (binding = 2) uniform DirectionalLight {
 	vec4 color;
 	vec4 direction;
 } dl_data;

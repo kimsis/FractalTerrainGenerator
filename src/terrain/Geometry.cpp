@@ -37,28 +37,31 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data) {
 
     Geometry result;
 
-    // Create vertex positions buffer and copy data into it:
+    // Create vertex positions from buffer and copy data into it:
     size_t positions_buffer_byte_size = geometry_data.positions.size() * sizeof(geometry_data.positions[0]);
-    result.positionsBuffer = vklCreateHostCoherentBufferAndUploadData(
+    result.positionsFromBuffer = vklCreateHostCoherentBufferAndUploadData(
         static_cast<const void*>(geometry_data.positions.data()),
         positions_buffer_byte_size,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
     );
 
-    // Create vertex color buffer and copy data into it:
-    result.colorsBuffer = VK_NULL_HANDLE;
-    if (geometry_data.colors.size() > 0) {
-        size_t colors_buffer_byte_size = geometry_data.colors.size() * sizeof(geometry_data.colors[0]);
-        result.colorsBuffer = vklCreateHostCoherentBufferAndUploadData(
-            geometry_data.colors.data(),
-            colors_buffer_byte_size,
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-        );
-    }
+    // Create vertex positions to buffer and copy data into it:
+    result.positionsToBuffer = vklCreateHostCoherentBufferAndUploadData(
+        static_cast<const void*>(geometry_data.positions.data()),
+        positions_buffer_byte_size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+    );
 
-    // Create vertex normals buffer and copy data into it:
+    // Create vertex normals from buffer and copy data into it:
     size_t normals_buffer_byte_size = geometry_data.normals.size() * sizeof(geometry_data.normals[0]);
-    result.normalsBuffer = vklCreateHostCoherentBufferAndUploadData(
+    result.normalsFromBuffer = vklCreateHostCoherentBufferAndUploadData(
+        geometry_data.normals.data(),
+        normals_buffer_byte_size,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+    );
+
+    // Create vertex normals to buffer and copy data into it:
+    result.normalsToBuffer = vklCreateHostCoherentBufferAndUploadData(
         geometry_data.normals.data(),
         normals_buffer_byte_size,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
@@ -91,9 +94,8 @@ void destroyGeometryGpuMemory(const Geometry& geometry) {
     if (geometry.textureCoordinatesBuffer != VK_NULL_HANDLE) {
         vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.textureCoordinatesBuffer);
     }
-    vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.normalsBuffer);
-    if (geometry.colorsBuffer != VK_NULL_HANDLE) {
-        vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.colorsBuffer);
-    }
-    vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.positionsBuffer);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.positionsFromBuffer);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.positionsToBuffer);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.normalsFromBuffer);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.normalsToBuffer);
 }

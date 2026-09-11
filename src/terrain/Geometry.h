@@ -25,11 +25,6 @@ struct GeometryData {
     // Each triple of indices defines one triangle.
     std::vector<uint32_t> indices;
 
-    /*!
-     * Vertex colors
-     */
-    std::vector<glm::vec3> colors;
-
     // A vector of vertex normals.
     std::vector<glm::vec3> normals;
 
@@ -44,7 +39,16 @@ struct GeometryData {
  */
 struct Geometry {
     // A handle to a GPU buffer that contains vertex position data.
-    VkBuffer positionsBuffer;
+    VkBuffer positionsFromBuffer;
+
+    // A handle to a GPU buffer that contains vertex position data.
+    VkBuffer positionsToBuffer;
+
+    // A handle to a GPU buffer that contains vertex normal data.
+    VkBuffer normalsFromBuffer;
+
+    // A handle to a GPU buffer that contains vertex normal data.
+    VkBuffer normalsToBuffer;
 
     // A handle to a GPU buffer that contains face indices data.
     VkBuffer indicesBuffer;
@@ -52,18 +56,12 @@ struct Geometry {
     // The total number of indices contained within the indicesBuffer.
     uint32_t numberOfIndices;
 
-    // A handle to a GPU buffer that contains vertex normal data.
-    VkBuffer colorsBuffer;
-
-    // A handle to a GPU buffer that contains vertex normal data.
-    VkBuffer normalsBuffer;
-
     // A handle to a GPU buffer that contains vertex texture coordinate data.
     VkBuffer textureCoordinatesBuffer;
 };
 
 /*!
- *	Creates terrain geometry with vertex color attribute
+ *	Creates terrain geometry (positions, normals, indices) for the given params.
  *	@param params parameters for terrain generation
  *	@return all terrain data
  */
