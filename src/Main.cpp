@@ -170,6 +170,12 @@ struct UniformBufferVert {
 
     /*! 0-1 float for the smooth transition between hurst/seed changes */
     float blendFactor;
+
+    /*! isBlend toggle, to avoid degenerate mixing of the same geometry in shaders.
+     *  Must be a 4-byte type: GLSL's std140 `bool` occupies a full 4-byte slot like `int`,
+     *  whereas C++'s native `bool` is 1 byte — using `bool` here leaves 3 padding bytes
+     *  uninitialized that the GPU would read as part of the same value. */
+    uint32_t isBlending;
 };
 
 struct UniformBufferFrag {
@@ -209,6 +215,38 @@ struct PointLight {
 
     /*! Attenuation properties of this light source */
     glm::vec4 attenuation;
+};
+
+/*!
+ *	Holds every GPU resource (pipelines, geometries, uniform buffers, descriptor sets, textures)
+ *	that make up the terrain scene (Terrain + dir light).
+ */
+struct TerrainScene {
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkDescriptorPool descriptor_pool;
+    // Pipelines are built lazily, on first use of a given (polygon mode, cull mode) combination —
+    // see buildTerrainPipeline(...) — so most of these start out (and often stay) VK_NULL_HANDLE.
+    VkPipeline pipelines[POLYMODES][CULLMODES];
+    std::string vertexShaderPath;
+    std::string fragmentShaderPath;
+    std::vector<VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings;
+
+    VkBuffer ub_dirlight;
+
+    VkBuffer ub_terrain_vert;
+    VkBuffer ub_terrain_frag;
+    VkDescriptorSet ds_terrain;
+    Geometry terrain_geometry_from;
+    Geometry terrain_geometry_to;
+    TerrainParams terrainParams;
+    float heightScale;
+    float waterLevel;
+    const char* cameraMode;
+
+    float blendStartTime;
+    float blendDuration = 1.0f;
+
+    std::future<GeometryData> pendingTerrainGeneration;
 };
 
 /*!
@@ -260,39 +298,17 @@ void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoff
  *	with the given pipeline, and render the given geometry (using its vertex and index buffers).
  *	Record everything into the current command buffer as provided by the framework.
  *	@param	pipeline		Valid handle to a given pipeline which shall be used for drawing.
- *	@param	geometry		Reference to a geometry object containing the buffers to be used for drawing.
+ *	@param	geometry_from		Reference to a geometry_from object containing the buffers to be used for drawing.
  *	@param	material		Valid handle to a descriptor set that refers to resources that contain material properties.
  *	@param	num_instances	How many instances to draw of the given geometry. Default = one single instance.
  */
-void drawGeometryWithMaterial(VkPipeline pipeline, const Geometry& geometry, VkDescriptorSet material, uint32_t num_instances = 1u);
-
-/*!
- *	Holds every GPU resource (pipelines, geometries, uniform buffers, descriptor sets, textures)
- *	that make up the terrain scene (Terrain + dir light).
- */
-struct TerrainScene {
-    VkDescriptorSetLayout descriptor_set_layout;
-    VkDescriptorPool descriptor_pool;
-    // Pipelines are built lazily, on first use of a given (polygon mode, cull mode) combination —
-    // see buildTerrainPipeline(...) — so most of these start out (and often stay) VK_NULL_HANDLE.
-    VkPipeline pipelines[POLYMODES][CULLMODES];
-    std::string vertexShaderPath;
-    std::string fragmentShaderPath;
-    std::vector<VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings;
-
-    VkBuffer ub_dirlight;
-
-    VkBuffer ub_terrain_vert;
-    VkBuffer ub_terrain_frag;
-    VkDescriptorSet ds_terrain;
-    Geometry terrain_geometry;
-    TerrainParams terrainParams;
-    float heightScale;
-    float waterLevel;
-    const char* cameraMode;
-
-    std::future<GeometryData> pendingTerrainGeneration;
-};
+void drawGeometryWithMaterial(
+    VkPipeline pipeline,
+    const Geometry& geometry_from,
+    const Geometry& geometry_to,
+    VkDescriptorSet material,
+    uint32_t num_instances = 1u
+);
 
 /*!
  *	Builds (compiles + creates) the terrain pipeline for one (polygon mode, cull mode) combination,
@@ -1228,7 +1244,13 @@ void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffe
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
 }
 
-void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer vert_buffer, VkBuffer frag_buffer, VkBuffer directional_light_data) {
+void writeDescriptorSet(
+    VkDevice device,
+    VkDescriptorSet descriptor_set,
+    VkBuffer vert_buffer,
+    VkBuffer frag_buffer,
+    VkBuffer directional_light_data
+) {
     // Write the two always-needed bindings first:
     writeDescriptorSet(device, descriptor_set, vert_buffer, frag_buffer);
 
@@ -1254,7 +1276,13 @@ void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffe
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
 }
 
-void drawGeometryWithMaterial(VkPipeline pipeline, const Geometry& geometry, VkDescriptorSet material, uint32_t num_instances) {
+void drawGeometryWithMaterial(
+    VkPipeline pipeline,
+    const Geometry& geometry_from,
+    const Geometry& geometry_to,
+    VkDescriptorSet material,
+    uint32_t num_instances
+) {
     /* --------------------------------------------- */
     // Subtask 3.4: Command Buffer Recording
     /* --------------------------------------------- */
@@ -1266,14 +1294,14 @@ void drawGeometryWithMaterial(VkPipeline pipeline, const Geometry& geometry, VkD
     VkPipelineLayout pipeline_layout = vklGetLayoutForPipeline(pipeline);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u, &material, 0u, nullptr);
 
-    // Record the draw call into the command buffer, which uses vertex and index buffers of the geometry:
+    // Record the draw call into the command buffer, which uses vertex and index buffers of the geometry_from:
     vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    VkBuffer vertex_buffers[4] = {geometry.positionsFromBuffer, geometry.positionsToBuffer, geometry.normalsFromBuffer, geometry.normalsToBuffer};
+    VkBuffer vertex_buffers[4] = {geometry_from.positionsBuffer, geometry_to.positionsBuffer, geometry_from.normalsBuffer, geometry_to.normalsBuffer};
     VkDeviceSize offsets[4] = {0, 0, 0, 0};
     vkCmdBindVertexBuffers(cb, 0u, 4u, vertex_buffers, offsets);
 
-    vkCmdBindIndexBuffer(cb, geometry.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cb, geometry.numberOfIndices, num_instances, 0u, 0u, 0u);
+    vkCmdBindIndexBuffer(cb, geometry_to.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cb, geometry_to.numberOfIndices, num_instances, 0u, 0u, 0u);
 }
 
 /* --------------------------------------------- */
@@ -1372,7 +1400,7 @@ TerrainScene setupTerrainScene(
     vklCopyDataIntoHostCoherentBuffer(scene.ub_dirlight, &directional_light, sizeof(DirectionalLight));
 
     // terrain geometry and material
-    scene.terrain_geometry = createAndUploadIntoGpuMemory(terrain_geometry_data);
+    scene.terrain_geometry_to = createAndUploadIntoGpuMemory(terrain_geometry_data);
     scene.ub_terrain_vert = vklCreateHostCoherentBufferWithBackingMemory(
         sizeof(UniformBufferVert),
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
@@ -1390,19 +1418,29 @@ TerrainScene setupTerrainScene(
 void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera& camera) {
     if (scene.pendingTerrainGeneration.valid() &&
         scene.pendingTerrainGeneration.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+        scene.blendStartTime = glfwGetTime();
         GeometryData new_terrain_geometry_data = scene.pendingTerrainGeneration.get();
         // The old buffers might still be in use by an in-flight frame — wait for the GPU to be idle
         // before destroying/replacing them.
         vkDeviceWaitIdle(vk_device);
-        destroyGeometryGpuMemory(scene.terrain_geometry);
-        scene.terrain_geometry = createAndUploadIntoGpuMemory(new_terrain_geometry_data);
+
+        if (scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE) {
+            destroyGeometryGpuMemory(scene.terrain_geometry_from);
+        }
+        scene.terrain_geometry_from = scene.terrain_geometry_to;
+        scene.terrain_geometry_to = createAndUploadIntoGpuMemory(new_terrain_geometry_data);
     }
 
     UniformBufferVert ub_vert_data;
     ub_vert_data.modelMatrix = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, scene.heightScale));
     ub_vert_data.modelMatrixForNormals = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, 1 / scene.heightScale));
     ub_vert_data.viewProjMatrix = camera.getViewProjectionMatrix();
-    ub_vert_data.blendFactor = 0.0f;
+    ub_vert_data.blendFactor = glm::clamp((static_cast<float>(glfwGetTime()) - scene.blendStartTime) / scene.blendDuration, 0.0f, 1.0f);
+    if (scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE && ub_vert_data.blendFactor >= 1.0f) {
+        destroyGeometryGpuMemory(scene.terrain_geometry_from);
+        scene.terrain_geometry_from = Geometry{};
+    }
+    ub_vert_data.isBlending = scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE;
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_vert, &ub_vert_data, sizeof(UniformBufferVert));
 
     UniformBufferFrag ub_frag_data;
@@ -1419,7 +1457,13 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
         // and it'll be reused from here on instead of being rebuilt every frame.
         selected_pipeline = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
     }
-    drawGeometryWithMaterial(selected_pipeline, scene.terrain_geometry, scene.ds_terrain);
+    bool has_from = scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE;
+    drawGeometryWithMaterial(
+        selected_pipeline,
+        has_from ? scene.terrain_geometry_from : scene.terrain_geometry_to,
+        scene.terrain_geometry_to,
+        scene.ds_terrain
+    );
 }
 
 void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
@@ -1427,7 +1471,9 @@ void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
     vkDestroyDescriptorPool(vk_device, scene.descriptor_pool, nullptr);
     vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain_vert);
     vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain_frag);
-    destroyGeometryGpuMemory(scene.terrain_geometry);
+    if (scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE) {
+        destroyGeometryGpuMemory(scene.terrain_geometry_from);
+    }
     vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_dirlight);
 
     for (size_t i = 0; i < POLYMODES; ++i) {

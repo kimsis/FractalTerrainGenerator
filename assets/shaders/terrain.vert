@@ -10,6 +10,7 @@ layout (binding = 0) uniform UniformBufferVert {
 	mat4 modelMatrixForNormals;
 	mat4 viewProjMatrix;
 	float blendFactor;
+	bool isBlending;
 } ub_data;
 
 layout (location = 0) out VertexData {
@@ -19,13 +20,19 @@ layout (location = 0) out VertexData {
 
 
 void main() {
-	vec4 position_world_from = ub_data.modelMatrix * vec4(in_position_from, 1);
 	vec4 position_world_to = ub_data.modelMatrix * vec4(in_position_to, 1);
-	vert_out.position_world = mix(position_world_from, position_world_to, ub_data.blendFactor);
-
-	vec3 normal_world_from = mat3(ub_data.modelMatrixForNormals) * in_normal_from;
 	vec3 normal_world_to = mat3(ub_data.modelMatrixForNormals) * in_normal_to;
-	vert_out.normal_world = normalize(mix(normal_world_from, normal_world_to, ub_data.blendFactor));
+
+	if (ub_data.isBlending) {
+		vec4 position_world_from = ub_data.modelMatrix * vec4(in_position_from, 1);
+		vert_out.position_world = mix(position_world_from, position_world_to, ub_data.blendFactor);
+
+		vec3 normal_world_from = mat3(ub_data.modelMatrixForNormals) * in_normal_from;
+		vert_out.normal_world = normalize(mix(normal_world_from, normal_world_to, ub_data.blendFactor));
+	} else {
+		vert_out.position_world = position_world_to;
+		vert_out.normal_world = normal_world_to;
+	}
 
 	gl_Position = ub_data.viewProjMatrix * vert_out.position_world;
 }

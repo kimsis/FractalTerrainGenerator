@@ -64,7 +64,7 @@ GeometryData generateTerrainGeometry(const TerrainParams& params);
  * @param	geometry_data	The CPU-side geometry that shall be transferred into GPU-side buffers.
  * @return	A new Geometry instance containing handles to the newly created GPU buffers.
  */
-Geometry createAndUploadIntoGpuMemory(const GeometryData& old_geometry_data);
+Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data);
 
 /*!
  *	Frees the GPU buffers that have been created via createAndUploadIntoGpuMemory.

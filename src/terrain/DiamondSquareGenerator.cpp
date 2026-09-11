@@ -50,8 +50,6 @@ void DiamondSquareGenerator::GenerateIndices() {
 
 void DiamondSquareGenerator::GenerateHeightMap() {
     int step = size - 1;
-    float offsetSum = 0;
-    int offsetCount = 0;
     // Init corner values, a.k.a. square step 0
     float variance = varianceAt(0, params.hurst, params.initialVariance);
     at(heights, size, 0, 0) = batesOffset(params.seed, 0, 0, 0, variance);
@@ -60,8 +58,6 @@ void DiamondSquareGenerator::GenerateHeightMap() {
     at(heights, size, step, step) = batesOffset(params.seed, step, step, 0, variance);
     for (int i = 0; i < params.gridSizeExponent; i++) {
         variance = varianceAt(i + 1, params.hurst, params.initialVariance);
-        offsetSum += variance;
-        offsetCount++;
         int halfStep = step / 2;
         // Diamond step
         for (int j = halfStep; j < size - 1; j += step) {
