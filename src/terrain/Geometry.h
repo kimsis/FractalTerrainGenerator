@@ -27,9 +27,6 @@ struct GeometryData {
 
     // A vector of vertex normals.
     std::vector<glm::vec3> normals;
-
-    // A vector of vertex texture coordinates.
-    std::vector<glm::vec2> textureCoordinates;
 };
 
 /*!
@@ -55,9 +52,6 @@ struct Geometry {
 
     // The total number of indices contained within the indicesBuffer.
     uint32_t numberOfIndices;
-
-    // A handle to a GPU buffer that contains vertex texture coordinate data.
-    VkBuffer textureCoordinatesBuffer;
 };
 
 /*!

@@ -66,16 +66,6 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data) {
         normals_buffer_byte_size,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
     );
-    // Create vertex texture coordinates buffer and copy data into it:
-    result.textureCoordinatesBuffer = VK_NULL_HANDLE;
-    if (geometry_data.textureCoordinates.size() > 0) {
-        size_t texture_coordinates_buffer_byte_size = geometry_data.textureCoordinates.size() * sizeof(geometry_data.textureCoordinates[0]);
-        result.textureCoordinatesBuffer = vklCreateHostCoherentBufferAndUploadData(
-            geometry_data.textureCoordinates.data(),
-            static_cast<VkDeviceSize>(texture_coordinates_buffer_byte_size),
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-        );
-    }
     // Create indices buffer and copy data into it:
     size_t indices_buffer_byte_size = geometry_data.indices.size() * sizeof(geometry_data.indices[0]);
     result.indicesBuffer = vklCreateHostCoherentBufferAndUploadData(
@@ -91,9 +81,6 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data) {
 
 void destroyGeometryGpuMemory(const Geometry& geometry) {
     vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.indicesBuffer);
-    if (geometry.textureCoordinatesBuffer != VK_NULL_HANDLE) {
-        vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.textureCoordinatesBuffer);
-    }
     vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.positionsFromBuffer);
     vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.positionsToBuffer);
     vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.normalsFromBuffer);
