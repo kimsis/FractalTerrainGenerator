@@ -1474,6 +1474,7 @@ void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
     if (scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE) {
         destroyGeometryGpuMemory(scene.terrain_geometry_from);
     }
+    destroyGeometryGpuMemory(scene.terrain_geometry_to);
     vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_dirlight);
 
     for (size_t i = 0; i < POLYMODES; ++i) {
