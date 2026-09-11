@@ -11,6 +11,7 @@
 #include <chrono>
 #include <future>
 #include <iostream>
+#include <random>
 #include <sstream>
 #include <vector>
 
@@ -45,6 +46,10 @@ constexpr size_t POLYMODES = 2;
 constexpr size_t CULLMODES = 3;
 constexpr VkPolygonMode kTerrainPolygonModes[POLYMODES] = {VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE};
 constexpr VkCullModeFlags kTerrainCullModes[CULLMODES] = {VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT};
+
+// Fixed width every GUI slider is drawn at, so rows with different label lengths still line up — see
+// labelThenRightAlignedSlider.
+constexpr float kSliderWidth = 200.0f;
 
 static ImGuiSliderFlags flags = ImGuiSliderFlags_None;
 ImGuiWindowFlags window_flags = 0;
@@ -322,14 +327,14 @@ struct TerrainScene {
 
     VkBuffer ub_dirlight;
 
-    Geometry terrain_geometry;
-    TerrainParams terrainParams;
     VkBuffer ub_terrain;
     VkDescriptorSet ds_terrain;
+    Geometry terrain_geometry;
+    TerrainParams terrainParams;
+    float heightScale;
+    float waterLevel;
+    const char* cameraMode;
 
-    // Set by the "Apply" button (see buildGUI) to kick off a background regeneration; valid() stays
-    // true from the moment generation starts until updateAndDrawTerrainScene consumes the ready
-    // result — used both to detect completion and to disable "Apply" while one is already running.
     std::future<GeometryData> pendingTerrainGeneration;
 };
 
@@ -375,6 +380,25 @@ std::future<GeometryData> startTerrainGeneration(const TerrainParams& params);
  *	yet (e.g. the very first, initial generation at startup).
  */
 GeometryData generateTerrainGeometryWithLoadingScreen(const TerrainParams& params);
+
+/*!
+ *	Prints `label`, then positions the cursor so the widget that follows always ends flush with the
+ *	right edge, `widget_width` wide, regardless of the label's own width — instead of its position (or,
+ *	for non-input widgets like Button that ignore SetNextItemWidth, its right edge) drifting depending
+ *	on how long each row's label happens to be. Pass kSliderWidth for sliders/inputs; for a Button, pass
+ *	its own natural size (ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f) so the
+ *	button's actual right edge — not just where a kSliderWidth-wide widget would have started — lands at
+ *	the true right edge.
+ */
+void labelThenRightAlignedWidget(const char* label, float widget_width);
+
+/*!
+ *	Draws a fresh uint32_t seed from a properly-seeded std::mt19937, spanning the full uint32_t range.
+ *	Not rand(): rand()'s range is only guaranteed to be at least [0, 32767], it's implicitly-seeded
+ *	global state (producing the same sequence every run unless srand() is called), and has well-known
+ *	statistical weaknesses in its low-order bits.
+ */
+uint32_t generateRandomSeed();
 
 /*!
  * Builds the ImGUI Sidebar
@@ -1643,6 +1667,8 @@ TerrainScene setupTerrainScene(
 ) {
     TerrainScene scene{};
     scene.terrainParams = params;
+    scene.heightScale = 1.0f;
+    scene.cameraMode = "Default";
 
     /* --------------------------------------------- */
     // Subtask 2.1: Create a Custom Graphics Pipeline
@@ -1722,8 +1748,8 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
     // View-projection matrix and camera's position stay the same for all rendered objects:
     ub_data.viewProjMatrix = camera.getViewProjectionMatrix();
     ub_data.cameraPosition = glm::vec4{camera.getPosition(), 1.0f};
-    ub_data.modelMatrix = glm::mat4{1.0f};
-    ub_data.modelMatrixForNormals = glm::mat4{1.0f};
+    ub_data.modelMatrix = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, scene.heightScale));
+    ub_data.modelMatrixForNormals = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, 1 / scene.heightScale));
     ub_data.materialProperties = {CORNELL_KA, CORNELL_KD, CORNELL_KS, CORNELL_ALPHA};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain, &ub_data, sizeof(UniformBuffer));
 
@@ -1788,8 +1814,25 @@ GeometryData generateTerrainGeometryWithLoadingScreen(const TerrainParams& param
     return terrain_geometry_future.get();
 }
 
+uint32_t generateRandomSeed() {
+    static std::mt19937 rng(std::random_device{}());
+    static std::uniform_int_distribution<uint32_t> dist;
+    return dist(rng);
+}
+
+void labelThenRightAlignedWidget(const char* label, float widget_width) {
+    ImGui::Spacing();
+    float right_edge_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text("%s", label);
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(right_edge_x - widget_width);
+    ImGui::SetNextItemWidth(widget_width);
+}
+
 void buildGUI(TerrainScene& scene) {
     const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+    const ImGuiSliderFlags flags_for_sliders = (flags & ~ImGuiSliderFlags_WrapAround);
 
     if (!ImGui::Begin("Terrain Settings", &g_panel_open, window_flags)) {
         // Early out if the window is collapsed, as an optimization.
@@ -1797,20 +1840,39 @@ void buildGUI(TerrainScene& scene) {
         return;
     }
 
-    const ImGuiSliderFlags flags_for_sliders = (flags & ~ImGuiSliderFlags_WrapAround);
-    ImGui::Text("Hurst exponent: %f", scene.terrainParams.hurst);
-    ImGui::SliderFloat("SliderFloat (0 -> 1)", &scene.terrainParams.hurst, 0.0f, 1.0f, "%.3f", flags_for_sliders);
-
     bool generation_in_progress = scene.pendingTerrainGeneration.valid();
+    const char* generation_status_text = generation_in_progress ? "Generating" : "Generated";
+    float generation_status_offset = (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(generation_status_text).x) * 0.5f;
+    if (generation_status_offset > 0.0f) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + generation_status_offset);
+    }
+    ImGui::Text("%s", generation_status_text);
+
+    labelThenRightAlignedWidget("Hurst Exponent", kSliderWidth);
     ImGui::BeginDisabled(generation_in_progress);
-    if (ImGui::Button("Apply")) {
+    ImGui::SliderFloat("##hurst", &scene.terrainParams.hurst, 0.0f, 1.0f, "%f", flags_for_sliders);
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
         scene.pendingTerrainGeneration = startTerrainGeneration(scene.terrainParams);
     }
     ImGui::EndDisabled();
-    if (generation_in_progress) {
-        ImGui::SameLine();
-        ImGui::Text("Generating...");
+
+    labelThenRightAlignedWidget("Height Scale", kSliderWidth);
+    ImGui::SliderFloat("##heightScale", &scene.heightScale, 0.000001f, 5.0f, "%f", flags_for_sliders);
+
+    labelThenRightAlignedWidget("Water level", kSliderWidth);
+    ImGui::SliderFloat("##waterLevel", &scene.waterLevel, -20.0f, 20.0f, "%f", flags_for_sliders);
+
+    std::string seed_label = "Current seed: " + std::to_string(scene.terrainParams.seed);
+    float reseed_button_width = ImGui::CalcTextSize("Reseed").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    labelThenRightAlignedWidget(seed_label.c_str(), reseed_button_width);
+    ImGui::BeginDisabled(generation_in_progress);
+    if (ImGui::Button("Reseed")) {
+        scene.terrainParams.seed = generateRandomSeed();
+        scene.pendingTerrainGeneration = startTerrainGeneration(scene.terrainParams);
     }
+    ImGui::EndDisabled();
+
+    ImGui::Text("Camera Mode: %s", scene.cameraMode);
 
     ImGui::End();
 }
