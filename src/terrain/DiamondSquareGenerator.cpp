@@ -38,12 +38,12 @@ void DiamondSquareGenerator::GenerateIndices() {
             uint32_t botRight = (x + 1) * size + y + 1;
             // triangle 1
             indices[counter++] = topLeft;
-            indices[counter++] = botLeft;
             indices[counter++] = topRight;
+            indices[counter++] = botLeft;
             // triangle 2
             indices[counter++] = topRight;
-            indices[counter++] = botLeft;
             indices[counter++] = botRight;
+            indices[counter++] = botLeft;
         }
     }
 }
