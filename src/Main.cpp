@@ -822,7 +822,7 @@ int main(int argc, char** argv) {
     // Create a camera helper object:
     TrackballCamera trackballCamera(field_of_view, aspect_ratio, near_plane_distance, far_plane_distance);
     FlyCamera flyCamera(field_of_view, aspect_ratio, near_plane_distance, far_plane_distance);
-    Camera* activeCamera = &flyCamera;
+    Camera* activeCamera = &trackballCamera;
 
     // Establish a callback function for handling mouse button events:
     glfwSetMouseButtonCallback(window, mouseButtonCallbackFromGlfw);
