@@ -48,8 +48,7 @@ constexpr size_t CULLMODES = 3;
 constexpr VkPolygonMode kTerrainPolygonModes[POLYMODES] = {VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE};
 constexpr VkCullModeFlags kTerrainCullModes[CULLMODES] = {VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT};
 
-// Fixed width every GUI slider is drawn at, so rows with different label lengths still line up — see
-// labelThenRightAlignedSlider.
+/*! Fixed width every GUI slider is drawn at, used by labelThenRightAlignedWidget. */
 constexpr float kSliderWidth = 200.0f;
 
 static ImGuiSliderFlags flags = ImGuiSliderFlags_None;
@@ -222,8 +221,7 @@ struct PointLight {
 struct TerrainScene {
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
-    // Pipelines are built lazily, on first use of a given (polygon mode, cull mode) combination —
-    // see buildTerrainPipeline(...) — so most of these start out (and often stay) VK_NULL_HANDLE.
+    /*! Pipelines are built lazily, on first use of each (polygon mode, cull mode) combination. */
     VkPipeline pipelines[POLYMODES][CULLMODES];
     std::string vertexShaderPath;
     std::string fragmentShaderPath;
@@ -247,7 +245,7 @@ struct TerrainScene {
 };
 
 /*!
- * A raycast hit result for
+ * A raycast hit result.
  */
 struct Hit {
     glm::vec3 point;
@@ -514,9 +512,6 @@ int main(int argc, char** argv) {
     }
     VKL_LOG("Subtask 1.2 done.");
 
-    // Snap the window to the top-left corner of the requested monitor (windowed mode only —
-    // fullscreen already picked its monitor above via `monitor`). monitor_index 0 (the default)
-    // leaves window placement up to the OS, unchanged from before.
     if (!fullscreen && monitor_index > 0) {
         int monitor_count = 0;
         GLFWmonitor** monitors = glfwGetMonitors(&monitor_count);
@@ -794,8 +789,6 @@ int main(int argc, char** argv) {
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
 
-    // install_callbacks=false: we forward events ourselves from our own GLFW callbacks below,
-    // so dragging the camera and interacting with ImGui widgets don't fight over the same input.
     ImGui_ImplGlfw_InitForVulkan(window, /*install_callbacks=*/false);
 
     ImGui_ImplVulkan_InitInfo imgui_init_info = {};
@@ -805,7 +798,6 @@ int main(int argc, char** argv) {
     imgui_init_info.Device = vk_device;
     imgui_init_info.QueueFamily = selected_queue_family_index;
     imgui_init_info.Queue = vk_queue;
-    // Let the backend create its own small internal descriptor pool rather than managing one ourselves:
     imgui_init_info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
     imgui_init_info.MinImageCount = surface_capabilities.minImageCount;
     imgui_init_info.ImageCount = swapchain_image_count;
@@ -813,15 +805,10 @@ int main(int argc, char** argv) {
     imgui_init_info.PipelineInfoMain.Subpass = 0u;
     imgui_init_info.MinAllocationSize = 1024u * 1024u;
     ImGui_ImplVulkan_Init(&imgui_init_info);
-    // Font atlas texture upload is automatic (handled internally on first NewFrame()) in this ImGui version -
-    // no manual one-shot command buffer needed here.
 
     /* --------------------------------------------- */
     // Subtasks 2.1, 2.3, 3.5-3.7, 4.5, 5.5, 5.7: Set up the Demo Scene
     /* --------------------------------------------- */
-    // Terrain generation is pure CPU work and can take a noticeable amount of time (especially in a
-    // Debug build); generateTerrainGeometryWithLoadingScreen runs it on a background thread while
-    // keeping the window responsive, and is reused later for regeneration after param changes too.
     TerrainParams initial_terrain_params;
     GeometryData initial_terrain_geometry = generateTerrainGeometryWithLoadingScreen(initial_terrain_params);
 
@@ -887,21 +874,18 @@ int main(int argc, char** argv) {
 
         float delta_x = mouse_x - mouse_x_last;
         float delta_y = mouse_y - mouse_y_last;
-        constexpr float kMouseSensitivity = 0.005f; // radians per pixel — tune to taste
+        constexpr float kMouseSensitivity = 0.005f;
         float yawDelta = delta_x * kMouseSensitivity;
         float pitchDelta = -delta_y * kMouseSensitivity;
-        // Fly: rotate unconditionally (mouselook, no button needed). Trackball: only while dragging.
         if (g_toggle_camera || g_dragging) activeCamera->rotate((g_toggle_camera ? -1 : 1) * yawDelta, pitchDelta);
 
-        // Shift doubles the slider speed on top of it, not in place of it.
         bool shiftHeld = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
         activeCamera->setSpeed(g_camera_speed * (shiftHeld ? 2.0f : 1.0f));
 
         if (g_strafing && !g_toggle_camera) {
-            constexpr float kPanSensitivity = 0.01f; // world units (pre-speed) per pixel — tune to taste
+            constexpr float kPanSensitivity = 0.01f;
             glm::vec3 right = trackballCamera.getRight();
             glm::vec3 camUp = trackballCamera.getUp();
-            // Negated so dragging feels like grabbing the world: content under the cursor follows it.
             glm::vec3 worldDelta = (-delta_x * right + delta_y * camUp) * kPanSensitivity;
             trackballCamera.translate(worldDelta);
         }
@@ -1313,10 +1297,8 @@ void writeDescriptorSet(
     VkBuffer frag_buffer,
     VkBuffer directional_light_data
 ) {
-    // Write the two always-needed bindings first:
     writeDescriptorSet(device, descriptor_set, vert_buffer, frag_buffer);
 
-    // Then write the extra one:
     VkDescriptorBufferInfo dirlight_buffer_info = {};
     dirlight_buffer_info.buffer = directional_light_data;
     dirlight_buffer_info.offset = static_cast<VkDeviceSize>(0);
@@ -1356,7 +1338,6 @@ void drawGeometryWithMaterial(
     VkPipelineLayout pipeline_layout = vklGetLayoutForPipeline(pipeline);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u, &material, 0u, nullptr);
 
-    // Record the draw call into the command buffer, which uses vertex and index buffers of the geometry_from:
     vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     VkBuffer vertex_buffers[4] = {geometry_from.positionsBuffer, geometry_to.positionsBuffer, geometry_from.normalsBuffer, geometry_to.normalsBuffer};
     VkDeviceSize offsets[4] = {0, 0, 0, 0};
@@ -1424,8 +1405,6 @@ TerrainScene setupTerrainScene(
     /* --------------------------------------------- */
     // Subtask 3.3: Interaction
     /* --------------------------------------------- */
-    // Pipelines are built lazily (see buildTerrainPipeline) — only the initially-selected combination
-    // is built up front, so startup doesn't pay for all POLYMODES*CULLMODES shader compiles at once.
     scene.pipelines[g_polygon_mode_index][g_culling_index] = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
 
     /* --------------------------------------------- */
@@ -1451,7 +1430,6 @@ TerrainScene setupTerrainScene(
     result = vkCreateDescriptorSetLayout(vk_device, &descriptor_set_layout_create_info, nullptr, &scene.descriptor_set_layout);
     VKL_CHECK_VULKAN_RESULT(result);
 
-    // Create buffer for the light source
     VkDeviceSize num_dirlights = 1;
     scene.ub_dirlight = vklCreateHostCoherentBufferWithBackingMemory(
         sizeof(DirectionalLight) * num_dirlights,
@@ -1460,7 +1438,6 @@ TerrainScene setupTerrainScene(
     DirectionalLight directional_light = {DIRLIGHT_COLOR, glm::normalize(DIRLIGHT_DIR)};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_dirlight, &directional_light, sizeof(DirectionalLight));
 
-    // terrain geometry and material
     scene.terrain_geometry_to = createAndUploadIntoGpuMemory(terrain_geometry_data);
     scene.ub_terrain_vert = vklCreateHostCoherentBufferWithBackingMemory(
         sizeof(UniformBufferVert),
@@ -1481,8 +1458,6 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
         scene.pendingTerrainGeneration.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
         scene.blendStartTime = glfwGetTime();
         GeometryData new_terrain_geometry_data = scene.pendingTerrainGeneration.get();
-        // The old buffers might still be in use by an in-flight frame — wait for the GPU to be idle
-        // before destroying/replacing them.
         vkDeviceWaitIdle(vk_device);
 
         if (scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE) {
@@ -1512,8 +1487,6 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
 
     VkPipeline& selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
     if (selected_pipeline == VK_NULL_HANDLE) {
-        // First time this (polygon mode, cull mode) combination has been selected: build it now,
-        // and it'll be reused from here on instead of being rebuilt every frame.
         selected_pipeline = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
     }
     bool has_from = scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE;
@@ -1602,7 +1575,6 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     const ImGuiSliderFlags flags_for_sliders = (flags & ~ImGuiSliderFlags_WrapAround);
 
     if (!ImGui::Begin("Terrain Settings", &g_panel_open, window_flags)) {
-        // Early out if the window is collapsed, as an optimization.
         ImGui::End();
         return;
     }
@@ -1675,9 +1647,9 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
 
 std::optional<Hit> raycastTerrain(const TerrainScene& terrainScene, const glm::vec3& origin, const glm::vec3& direction) {
     constexpr float kGroundPlaneZ = 0.0f;
-    if (std::abs(direction.z) < 1e-6f) return std::nullopt; // ray parallel to the plane — never hits
+    if (std::abs(direction.z) < 1e-6f) return std::nullopt;
     float t = (kGroundPlaneZ - origin.z) / direction.z;
-    if (t < 0.0f) return std::nullopt; // plane is behind the camera
+    if (t < 0.0f) return std::nullopt;
     glm::vec3 point = origin + t * direction;
     return Hit{point, t};
 }
