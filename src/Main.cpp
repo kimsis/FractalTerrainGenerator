@@ -501,6 +501,7 @@ static int g_culling_index = 0;
 static bool g_draw_normals = false;
 static bool g_toggle_camera = false;
 static bool g_toggle_camera_requested = false;
+static bool g_reseed_requested = false;
 static float g_camera_speed = 5.0f;
 
 /*!
@@ -532,15 +533,10 @@ int main(int argc, char** argv) {
 
     int window_width = 800;
     int window_height = 800;
-    bool fullscreen = false;
     std::string window_title = "Task 0";
     INIReader window_reader("assets/settings/window.ini");
 
-    window_width = window_reader.GetInteger("window", "width", 800);
-    window_height = window_reader.GetInteger("window", "height", 800);
-    fullscreen = window_reader.GetBoolean("window", "fullscreen", false);
     window_title = window_reader.Get("window", "title", WINDOW_TITLE);
-    int monitor_index = window_reader.GetInteger("window", "monitor_index", 0);
     std::string init_camera_filepath = "assets/settings/camera_terrain.ini";
     if (cmdline_args.init_camera) {
         init_camera_filepath = cmdline_args.init_camera_filepath;
@@ -551,6 +547,13 @@ int main(int argc, char** argv) {
     float near_plane_distance = static_cast<float>(camera_reader.GetReal("camera", "near", 0.1f));
     float far_plane_distance = static_cast<float>(camera_reader.GetReal("camera", "far", 100.0f));
     float aspect_ratio = static_cast<float>(window_width) / static_cast<float>(window_height);
+    glm::vec3 camera_position(
+        static_cast<float>(camera_reader.GetReal("camera", "position_x", 0.0f)),
+        static_cast<float>(camera_reader.GetReal("camera", "position_y", 0.0f)),
+        static_cast<float>(camera_reader.GetReal("camera", "position_z", 0.0f))
+    );
+    // Same convention as the live fly-camera controls: yaw/pitch = 0 looks along +X; positive
+    // pitch looks up, negative looks down.
     float camera_yaw = static_cast<float>(camera_reader.GetReal("camera", "yaw", 0.0f));
     float camera_pitch = static_cast<float>(camera_reader.GetReal("camera", "pitch", 0.0f));
     std::string init_renderer_filepath = "assets/settings/renderer_standard.ini";
@@ -579,11 +582,9 @@ int main(int argc, char** argv) {
         VKL_EXIT_WITH_ERROR("Failed to init GLFW");
     }
 
-    // Use a monitor if we'd like to open the window in fullscreen mode:
-    GLFWmonitor* monitor = nullptr;
-    if (fullscreen) {
-        monitor = glfwGetPrimaryMonitor();
-    }
+    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    int monitor_x, monitor_y;
+    glfwGetMonitorWorkarea(monitor, &monitor_x, &monitor_y, &window_width, &window_height);
 
     // Set some window settings before creating the window:
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // No need to create a graphics context for Vulkan
@@ -591,7 +592,7 @@ int main(int argc, char** argv) {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     GLFWwindow* window = nullptr;
-    window = glfwCreateWindow(window_width, window_height, window_title.c_str(), monitor, nullptr);
+    window = glfwCreateWindow(window_width, window_height, window_title.c_str(), nullptr, nullptr);
 
     if (!window) {
         VKL_LOG("If your program reaches this point, that means two things:");
@@ -599,17 +600,8 @@ int main(int argc, char** argv) {
         VKL_LOG("2) You haven't implemented Subtask 1.2, which is creating a window with GLFW.");
         VKL_EXIT_WITH_ERROR("No GLFW window created.");
     }
+    glfwSetWindowPos(window, monitor_x, monitor_y);
     VKL_LOG("Subtask 1.2 done.");
-
-    if (!fullscreen && monitor_index > 0) {
-        int monitor_count = 0;
-        GLFWmonitor** monitors = glfwGetMonitors(&monitor_count);
-        if (monitor_index < monitor_count) {
-            int monitor_x, monitor_y;
-            glfwGetMonitorPos(monitors[monitor_index], &monitor_x, &monitor_y);
-            glfwSetWindowPos(window, monitor_x, monitor_y);
-        }
-    }
 
     VkResult result;
     VkInstance vk_instance = VK_NULL_HANDLE;              // To be set during Subtask 1.3
@@ -792,6 +784,7 @@ int main(int argc, char** argv) {
             std::clamp(static_cast<uint32_t>(window_height), surface_capabilities.minImageExtent.height, surface_capabilities.maxImageExtent.height)
         );
     }
+    aspect_ratio = static_cast<float>(window_width) / static_cast<float>(window_height);
     // Build the swapchain config struct:
     VkSwapchainCreateInfoKHR swapchain_create_info = {};
     swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -929,9 +922,15 @@ int main(int argc, char** argv) {
     // Subtask 2.6: Orbit Camera
     /* --------------------------------------------- */
 
-    // Create a camera helper object:
-    TrackballCamera trackballCamera(field_of_view, aspect_ratio, near_plane_distance, far_plane_distance);
+    // Create a camera helper object, positioned/oriented per camera_terrain.ini. The trackball
+    // camera's target is derived by raycasting the configured position/direction against the
+    // terrain (same conversion used for live trackball<->fly switching further below), falling
+    // back to the origin if that ray doesn't hit the terrain (e.g. looking up).
     FlyCamera flyCamera(field_of_view, aspect_ratio, near_plane_distance, far_plane_distance);
+    flyCamera.translate(camera_position);
+    flyCamera.rotate(glm::radians(camera_yaw), glm::radians(camera_pitch));
+    auto initial_hit = raycastTerrain(terrain_scene, flyCamera.getPosition(), flyCamera.getForward());
+    TrackballCamera trackballCamera(flyCamera, initial_hit.has_value() ? initial_hit->point : glm::vec3(0.0f, 0.0f, 0.0f));
     Camera* activeCamera = &trackballCamera;
 
     // Callback function for handling mouse button events:
@@ -1014,6 +1013,14 @@ int main(int argc, char** argv) {
             glfwGetCursorPos(window, &mouse_x, &mouse_y);
             mouse_x_last = mouse_x;
             mouse_y_last = mouse_y;
+        }
+
+        if (g_reseed_requested) {
+            g_reseed_requested = false;
+            if (!terrain_scene.pendingTerrainGeneration.valid()) {
+                terrain_scene.terrainParams.seed = generateRandomSeed();
+                terrain_scene.pendingTerrainGeneration = startTerrainGeneration(terrain_scene.terrainParams);
+            }
         }
 
         float delta_x = mouse_x - mouse_x_last;
@@ -1316,6 +1323,9 @@ void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int a
     }
     if (key == GLFW_KEY_C) {
         g_toggle_camera_requested = true;
+    }
+    if (key == GLFW_KEY_R) {
+        g_reseed_requested = true;
     }
 }
 
@@ -2065,6 +2075,7 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     ImGui::Text("F1: Toggle wireframe mode");
     ImGui::Text("F2: Cycle face culling mode");
     ImGui::Text("N: Toggle normals debug view");
+    ImGui::Text("R: Reseed terrain");
     ImGui::Text("Esc: Quit application");
     ImGui::Text("Shift: Double camera speed");
 
