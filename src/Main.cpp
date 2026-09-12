@@ -883,16 +883,14 @@ int main(int argc, char** argv) {
         activeCamera->setSpeed(g_camera_speed * (shiftHeld ? 2.0f : 1.0f));
 
         if (g_strafing && !g_toggle_camera) {
-            constexpr float kPanSensitivity = 0.01f;
             glm::vec3 right = trackballCamera.getRight();
             glm::vec3 camUp = trackballCamera.getUp();
-            glm::vec3 worldDelta = (-delta_x * right + delta_y * camUp) * kPanSensitivity;
+            glm::vec3 worldDelta = (-delta_x * right + delta_y * camUp) * trackballCamera.kPanSensitivity;
             trackballCamera.translate(worldDelta);
         }
 
         if (!g_toggle_camera && g_scroll_delta != 0.0f) {
-            constexpr float kScrollSensitivity = 0.5f;
-            trackballCamera.zoom(g_scroll_delta * kScrollSensitivity);
+            trackballCamera.zoom(g_scroll_delta * trackballCamera.kScrollSensitivity);
         }
         g_scroll_delta = 0.0f;
 

@@ -73,6 +73,8 @@ class Camera {
 
 class TrackballCamera : public Camera {
    public:
+    static const float kScrollSensitivity = 0.5f;
+    static const float kPanSensitivity = 0.01f;
     using Camera::Camera;
 
     /*! Converts an existing Camera into a TrackballCamera, carrying position/yaw/pitch/speed/
