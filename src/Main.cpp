@@ -528,7 +528,7 @@ int main(int argc, char** argv) {
     gcgParseArgs(cmdline_args, argc, argv);
 
     /* --------------------------------------------- */
-    // Subtask 1.1: Load Settings From File
+    // Load Settings From File
     /* --------------------------------------------- */
 
     int window_width = 800;
@@ -576,7 +576,7 @@ int main(int argc, char** argv) {
     glfwSetErrorCallback(errorCallbackFromGlfw);
 
     /* --------------------------------------------- */
-    // Subtask 1.2: Create a Window with GLFW
+    // Create a Window with GLFW
     /* --------------------------------------------- */
     if (!glfwInit()) {
         VKL_EXIT_WITH_ERROR("Failed to init GLFW");
@@ -604,15 +604,15 @@ int main(int argc, char** argv) {
     VKL_LOG("Subtask 1.2 done.");
 
     VkResult result;
-    VkInstance vk_instance = VK_NULL_HANDLE;              // To be set during Subtask 1.3
-    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;             // To be set during Subtask 1.4
-    VkPhysicalDevice vk_physical_device = VK_NULL_HANDLE; // To be set during Subtask 1.5
-    VkDevice vk_device = VK_NULL_HANDLE;                  // To be set during Subtask 1.7
-    VkQueue vk_queue = VK_NULL_HANDLE;                    // To be set during Subtask 1.7
-    VkSwapchainKHR vk_swapchain = VK_NULL_HANDLE;         // To be set during Subtask 1.8
+    VkInstance vk_instance = VK_NULL_HANDLE;
+    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
+    VkPhysicalDevice vk_physical_device = VK_NULL_HANDLE;
+    VkDevice vk_device = VK_NULL_HANDLE;
+    VkQueue vk_queue = VK_NULL_HANDLE;
+    VkSwapchainKHR vk_swapchain = VK_NULL_HANDLE;
 
     /* --------------------------------------------- */
-    // Subtask 1.3: Create a Vulkan Instance
+    // Create a Vulkan Instance
     /* --------------------------------------------- */
     VkApplicationInfo application_info = {};                     // Zero-initialize every member
     application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO; // Set this struct instance's type
@@ -651,7 +651,7 @@ int main(int argc, char** argv) {
     VKL_LOG("Subtask 1.3 done.");
 
     /* --------------------------------------------- */
-    // Subtask 1.4: Create a Vulkan Window Surface
+    // Create a Vulkan Window Surface
     /* --------------------------------------------- */
     result = glfwCreateWindowSurface(vk_instance, window, nullptr, &vk_surface);
     VKL_CHECK_VULKAN_RESULT(result);
@@ -661,7 +661,7 @@ int main(int argc, char** argv) {
     VKL_LOG("Subtask 1.4 done.");
 
     /* --------------------------------------------- */
-    // Subtask 1.5: Pick a Physical Device
+    // Pick a Physical Device
     /* --------------------------------------------- */
     // Query the number of physical devices:
     uint32_t physical_devices_count;
@@ -682,7 +682,7 @@ int main(int argc, char** argv) {
     VKL_LOG("Subtask 1.5 done.");
 
     /* --------------------------------------------- */
-    // Subtask 1.6: Select a Queue Family
+    // Select a Queue Family
     /* --------------------------------------------- */
     std::array<float, 1> queue_priorities = {1.0f};
 
@@ -702,7 +702,7 @@ int main(int argc, char** argv) {
     VKL_LOG("Subtask 1.6 done.");
 
     /* --------------------------------------------- */
-    // Subtask 1.7: Create a Logical Device and Get Queue
+    // Create a Logical Device and Get Queue
     /* --------------------------------------------- */
     std::vector<const char*> device_extensions;
     addDeviceExtensionToVectorIfSupported(VK_KHR_SWAPCHAIN_EXTENSION_NAME, vk_physical_device, device_extensions);
@@ -763,7 +763,7 @@ int main(int argc, char** argv) {
     VKL_LOG("Subtask 1.7 done.");
 
     /* --------------------------------------------- */
-    // Subtask 1.8: Create a Swapchain
+    // Create a Swapchain
     /* --------------------------------------------- */
     uint32_t queueFamilyIndexCount = 0u;
     std::vector<uint32_t> queueFamilyIndices;
@@ -825,7 +825,7 @@ int main(int argc, char** argv) {
     VKL_LOG("Subtask 1.8 done.");
 
     /* --------------------------------------------- */
-    // Subtask 2.7: Depth Test
+    // Depth Test
     /* --------------------------------------------- */
     VkImage depth_buffer = vklCreateDeviceLocalImageWithBackingMemory(
         vk_physical_device,
@@ -841,7 +841,7 @@ int main(int argc, char** argv) {
     depth_clear_value.depthStencil.stencil = 0u;
 
     /* --------------------------------------------- */
-    // Subtask 1.9: Init GCG Framework
+    // Init Framework
     /* --------------------------------------------- */
 
     // Gather swapchain config as required by the framework:
@@ -902,7 +902,7 @@ int main(int argc, char** argv) {
     ImGui_ImplVulkan_Init(&imgui_init_info);
 
     /* --------------------------------------------- */
-    // Subtasks 2.1, 2.3, 3.5-3.7, 4.5, 5.5, 5.7: Set up the Demo Scene
+    // Set up the Scene
     /* --------------------------------------------- */
     TerrainParams initial_terrain_params;
     GeometryData initial_terrain_geometry = generateTerrainGeometryWithLoadingScreen(initial_terrain_params);
@@ -919,7 +919,7 @@ int main(int argc, char** argv) {
     WaterScene water_scene = setupWaterScene(vk_device, initial_terrain_params);
 
     /* --------------------------------------------- */
-    // Subtask 2.6: Orbit Camera
+    // Camera
     /* --------------------------------------------- */
 
     // Create a camera helper object, positioned/oriented per camera_terrain.ini. The trackball
@@ -943,8 +943,8 @@ int main(int argc, char** argv) {
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallbackFromGlfw);
 
     /* --------------------------------------------- */
-    // Subtask 1.10: Set-up the Render Loop
-    // Subtask 1.11: Register a Key Callback
+    // Set-up the Render Loop
+    // Register a Key Callback
     /* --------------------------------------------- */
 
     glfwSetKeyCallback(window, handleGlfwKeyCallback);
@@ -1163,7 +1163,7 @@ int main(int argc, char** argv) {
     ImGui::DestroyContext();
 
     /* --------------------------------------------- */
-    // Subtask 1.12: Cleanup
+    // Cleanup
     /* --------------------------------------------- */
     vklDestroyFramework();
     vkDestroySwapchainKHR(vk_device, vk_swapchain, nullptr);
@@ -1310,7 +1310,7 @@ void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int a
         glfwSetWindowShouldClose(glfw_window, true);
     }
     /* --------------------------------------------- */
-    // Subtask 3.3: Interaction
+    // Interaction
     /* --------------------------------------------- */
     if (key == GLFW_KEY_F1) {
         g_polygon_mode_index = 1 - g_polygon_mode_index;
@@ -1658,7 +1658,7 @@ void drawGeometryWithMaterial(
     uint32_t num_instances
 ) {
     /* --------------------------------------------- */
-    // Subtask 3.4: Command Buffer Recording
+    // Command Buffer Recording
     /* --------------------------------------------- */
 
     // Get the current command buffer:
@@ -1698,11 +1698,11 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
             VkVertexInputAttributeDescription{3u, 3u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
         },
         /* --------------------------------------------- */
-        // Subtask 3.1: Wireframe Mode
+        // Wireframe Mode
         /* --------------------------------------------- */
         kTerrainPolygonModes[polygon_mode_index],
         /* --------------------------------------------- */
-        // Subtask 3.2: Back-face Culling
+        // Back-face Culling
         /* --------------------------------------------- */
         kTerrainCullModes[cull_mode_index],
         scene.descriptorSetLayoutBindings,
@@ -1722,7 +1722,7 @@ TerrainScene setupTerrainScene(
     scene.heightScale = 1.0f;
 
     /* --------------------------------------------- */
-    // Subtask 2.1: Create a Custom Graphics Pipeline
+    // Create a Custom Graphics Pipeline
     /* --------------------------------------------- */
     scene.descriptorSetLayoutBindings = {
         VkDescriptorSetLayoutBinding{0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT, nullptr},
@@ -1733,12 +1733,12 @@ TerrainScene setupTerrainScene(
     scene.fragmentShaderPath = gcgFindShaderFile("assets/shaders/terrain.frag");
 
     /* --------------------------------------------- */
-    // Subtask 3.3: Interaction
+    // Interaction
     /* --------------------------------------------- */
     scene.pipelines[g_polygon_mode_index][g_culling_index] = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
 
     /* --------------------------------------------- */
-    // Subtask 2.3: Allocate and Write Descriptors
+    // Allocate and Write Descriptors
     /* --------------------------------------------- */
     std::vector<VkDescriptorPoolSize> pool_sizes{VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3u}};
 
