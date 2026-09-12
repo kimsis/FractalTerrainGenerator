@@ -185,6 +185,19 @@ struct UniformBufferFrag {
 
     /*! Debug toggle for the normal-visualization branch in terrain.frag. */
     uint32_t drawNormals;
+
+    /*! Whether the camera is currently below the water plane; drives the underwater tint in
+     *  terrain.frag. A 4-byte type, not a native bool, for the same std140 reason as drawNormals. */
+    uint32_t isUnderwater;
+};
+
+/*!
+ *	Matches water.vert's uniform block exactly. No fragment-stage uniforms are needed since
+ *	water.frag uses a fixed color.
+ */
+struct UniformBufferWaterVert {
+    glm::mat4 modelMatrix;
+    glm::mat4 viewProjMatrix;
 };
 
 /*!
@@ -250,6 +263,25 @@ struct TerrainScene {
 struct Hit {
     glm::vec3 point;
     float distance;
+};
+
+/*!
+ *	Holds every GPU resource that makes up the water plane: a single flat quad, built once at
+ *	startup and never regenerated, since its footprint (the terrain's fixed XY extent) never changes.
+ */
+struct WaterScene {
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkDescriptorPool descriptor_pool;
+    VkPipeline pipeline;
+    std::string vertexShaderPath;
+    std::string fragmentShaderPath;
+
+    VkBuffer positionsBuffer;
+    VkBuffer indicesBuffer;
+    uint32_t numberOfIndices;
+
+    VkBuffer ub_water_vert;
+    VkDescriptorSet ds_water;
 };
 
 /*!
@@ -392,6 +424,24 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
  */
 void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene);
 std::optional<Hit> raycastTerrain(const TerrainScene& terrainScene, const glm::vec3& origin, const glm::vec3& direction);
+
+/*!
+ *	Builds the water plane's single quad (spanning the terrain's fixed XY footprint at local z=0),
+ *	pipeline, uniform buffer, and descriptor set.
+ */
+WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_params);
+
+/*!
+ *	Updates the water plane's uniform buffer (model matrix built from the terrain scene's current
+ *	waterLevel/heightScale) and records its draw call. Must be called between
+ *	vklStartRecordingCommands() and vklEndRecordingCommands(), after the terrain has been drawn.
+ */
+void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scene, const Camera* camera);
+
+/*!
+ *	Destroys all GPU resources owned by the given water scene.
+ */
+void cleanupWaterScene(VkDevice vk_device, WaterScene& scene);
 
 static bool g_dragging = false;
 static bool g_strafing = false;
@@ -815,6 +865,16 @@ int main(int argc, char** argv) {
     TerrainScene terrain_scene =
         setupTerrainScene(vk_device, vk_queue, selected_queue_family_index, initial_terrain_geometry, initial_terrain_params);
 
+    int initial_terrain_size = (1 << initial_terrain_params.gridSizeExponent) + 1;
+    terrain_scene.waterLevel = (
+        initial_terrain_geometry.positions[0].z +
+        initial_terrain_geometry.positions[initial_terrain_size - 1].z +
+        initial_terrain_geometry.positions[(initial_terrain_size - 1) * initial_terrain_size].z +
+        initial_terrain_geometry.positions[initial_terrain_size * initial_terrain_size - 1].z
+    ) / 4.0f;
+
+    WaterScene water_scene = setupWaterScene(vk_device, initial_terrain_params);
+
     /* --------------------------------------------- */
     // Subtask 2.6: Orbit Camera
     /* --------------------------------------------- */
@@ -918,6 +978,7 @@ int main(int argc, char** argv) {
         vklStartRecordingCommands();
 
         updateAndDrawTerrainScene(vk_device, terrain_scene, activeCamera);
+        updateAndDrawWaterScene(water_scene, terrain_scene, activeCamera);
 
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
 
@@ -952,6 +1013,7 @@ int main(int argc, char** argv) {
     // Cleanup:
     vklDestroyDeviceLocalImageAndItsBackingMemory(depth_buffer);
     cleanupTerrainScene(vk_device, terrain_scene);
+    cleanupWaterScene(vk_device, water_scene);
 
     /* --------------------------------------------- */
     // Dear ImGui: shutdown
@@ -1464,6 +1526,14 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
         GeometryData new_terrain_geometry_data = scene.pendingTerrainGeneration.get();
         vkDeviceWaitIdle(vk_device);
 
+        int size = (1 << scene.terrainParams.gridSizeExponent) + 1;
+        scene.waterLevel = (
+            new_terrain_geometry_data.positions[0].z +
+            new_terrain_geometry_data.positions[size - 1].z +
+            new_terrain_geometry_data.positions[(size - 1) * size].z +
+            new_terrain_geometry_data.positions[size * size - 1].z
+        ) / 4.0f;
+
         if (scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE) {
             destroyGeometryGpuMemory(scene.terrain_geometry_from);
         }
@@ -1487,6 +1557,7 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
     ub_frag_data.cameraPosition = glm::vec4{camera->getPosition(), 1.0f};
     ub_frag_data.materialProperties = {CORNELL_KA, CORNELL_KD, CORNELL_KS, CORNELL_ALPHA};
     ub_frag_data.drawNormals = g_draw_normals ? 1 : 0;
+    ub_frag_data.isUnderwater = camera->getPosition().z < scene.waterLevel * scene.heightScale ? 1 : 0;
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_frag, &ub_frag_data, sizeof(UniformBufferFrag));
 
     VkPipeline& selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
@@ -1518,6 +1589,121 @@ void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
             vklDestroyGraphicsPipeline(scene.pipelines[i][j]);
         }
     }
+}
+
+WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_params) {
+    WaterScene scene{};
+
+    int size = (1 << terrain_params.gridSizeExponent) + 1;
+    float half_extent = (size / 2.0f) * terrain_params.spacing;
+    std::vector<glm::vec3> positions = {
+        {-half_extent, -half_extent, 0.0f},
+        {half_extent, -half_extent, 0.0f},
+        {half_extent, half_extent, 0.0f},
+        {-half_extent, half_extent, 0.0f},
+    };
+    std::vector<uint32_t> indices = {0u, 1u, 2u, 0u, 2u, 3u};
+
+    scene.positionsBuffer = vklCreateHostCoherentBufferAndUploadData(
+        positions.data(),
+        positions.size() * sizeof(glm::vec3),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+    );
+    scene.indicesBuffer = vklCreateHostCoherentBufferAndUploadData(
+        indices.data(),
+        indices.size() * sizeof(uint32_t),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+    );
+    scene.numberOfIndices = static_cast<uint32_t>(indices.size());
+
+    scene.vertexShaderPath = gcgFindShaderFile("assets/shaders/water.vert");
+    scene.fragmentShaderPath = gcgFindShaderFile("assets/shaders/water.frag");
+
+    std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings = {
+        VkDescriptorSetLayoutBinding{0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT, nullptr},
+    };
+
+    VklGraphicsPipelineConfig pipeline_config{
+        scene.vertexShaderPath.c_str(),
+        scene.fragmentShaderPath.c_str(),
+        {VkVertexInputBindingDescription{0u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX}},
+        {VkVertexInputAttributeDescription{0u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 0u}},
+        VK_POLYGON_MODE_FILL,
+        VK_CULL_MODE_NONE,
+        descriptor_set_layout_bindings,
+        /* enableAlphaBlending: */ true,
+    };
+    scene.pipeline = vklCreateGraphicsPipeline(pipeline_config);
+
+    std::vector<VkDescriptorPoolSize> pool_sizes{VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u}};
+    VkDescriptorPoolCreateInfo descriptor_pool_create_info = {};
+    descriptor_pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descriptor_pool_create_info.maxSets = 1u;
+    descriptor_pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
+    descriptor_pool_create_info.pPoolSizes = pool_sizes.data();
+    VkResult result = vkCreateDescriptorPool(vk_device, &descriptor_pool_create_info, nullptr, &scene.descriptor_pool);
+    VKL_CHECK_VULKAN_RESULT(result);
+
+    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {};
+    descriptor_set_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptor_set_layout_create_info.bindingCount = static_cast<uint32_t>(descriptor_set_layout_bindings.size());
+    descriptor_set_layout_create_info.pBindings = descriptor_set_layout_bindings.data();
+    result = vkCreateDescriptorSetLayout(vk_device, &descriptor_set_layout_create_info, nullptr, &scene.descriptor_set_layout);
+    VKL_CHECK_VULKAN_RESULT(result);
+
+    scene.ub_water_vert = vklCreateHostCoherentBufferWithBackingMemory(
+        sizeof(UniformBufferWaterVert),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+    );
+    scene.ds_water = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
+
+    VkDescriptorBufferInfo vert_buffer_info = {};
+    vert_buffer_info.buffer = scene.ub_water_vert;
+    vert_buffer_info.offset = static_cast<VkDeviceSize>(0);
+    vert_buffer_info.range = VK_WHOLE_SIZE;
+    VkWriteDescriptorSet write{
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        nullptr,
+        scene.ds_water,
+        /* dstBinding: */ 0u,
+        0u,
+        1u,
+        /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        nullptr,
+        /* pBufferInfo: */ &vert_buffer_info,
+        nullptr
+    };
+    vkUpdateDescriptorSets(vk_device, 1u, &write, 0u, nullptr);
+
+    return scene;
+}
+
+void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scene, const Camera* camera) {
+    UniformBufferWaterVert ub_data;
+    ub_data.modelMatrix = glm::translate(glm::mat4{1.0f}, glm::vec3(0.0f, 0.0f, terrain_scene.waterLevel * terrain_scene.heightScale));
+    ub_data.viewProjMatrix = camera->getViewProjectionMatrix();
+    vklCopyDataIntoHostCoherentBuffer(scene.ub_water_vert, &ub_data, sizeof(UniformBufferWaterVert));
+
+    VkCommandBuffer cb = vklGetCurrentCommandBuffer();
+    VkPipelineLayout pipeline_layout = vklGetLayoutForPipeline(scene.pipeline);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u, &scene.ds_water, 0u, nullptr);
+
+    vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, scene.pipeline);
+    VkBuffer vertex_buffers[1] = {scene.positionsBuffer};
+    VkDeviceSize offsets[1] = {0};
+    vkCmdBindVertexBuffers(cb, 0u, 1u, vertex_buffers, offsets);
+
+    vkCmdBindIndexBuffer(cb, scene.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cb, scene.numberOfIndices, 1u, 0u, 0u, 0u);
+}
+
+void cleanupWaterScene(VkDevice vk_device, WaterScene& scene) {
+    vkDestroyDescriptorSetLayout(vk_device, scene.descriptor_set_layout, nullptr);
+    vkDestroyDescriptorPool(vk_device, scene.descriptor_pool, nullptr);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_water_vert);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.positionsBuffer);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.indicesBuffer);
+    vklDestroyGraphicsPipeline(scene.pipeline);
 }
 
 void buildLoadingGUI() {
@@ -1603,7 +1789,7 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     ImGui::SliderFloat("##heightScale", &scene.heightScale, 0.000001f, 5.0f, "%f", flags_for_sliders);
 
     labelThenRightAlignedWidget("Water level", kSliderWidth);
-    ImGui::SliderFloat("##waterLevel", &scene.waterLevel, -20.0f, 20.0f, "%f", flags_for_sliders);
+    ImGui::SliderFloat("##waterLevel", &scene.waterLevel, -25.0f, 25.0f, "%f", flags_for_sliders);
 
     labelThenRightAlignedWidget("Camera Speed", kSliderWidth);
     ImGui::SliderFloat("##cameraSpeed", &g_camera_speed, 1.0f, 25.0f, "%f", flags_for_sliders);

@@ -10,6 +10,7 @@ layout (binding = 1) uniform UniformBufferFrag {
 	vec4 cameraPosition;
 	vec4 materialProperties; // ka, kd, ks, alpha
 	bool drawNormals;
+	bool isUnderwater;
 } ub_data;
 
 layout (binding = 2) uniform DirectionalLight {
@@ -59,4 +60,9 @@ void main() {
 		vec3 scaledNormal = 0.5 * n + 0.5;
         out_color = vec4(pow(scaledNormal.x, 2.2), pow(scaledNormal.y, 2.2), pow(scaledNormal.z, 2.2), 1.0);
     }
+
+	if (ub_data.isUnderwater) {
+		vec3 underwaterColor = vec3(0.0, 0.15, 0.3);
+		out_color = vec4(mix(out_color.rgb, underwaterColor, 0.6), out_color.a);
+	}
 }
