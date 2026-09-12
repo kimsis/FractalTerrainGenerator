@@ -88,6 +88,7 @@ add_executable(${PROJECT_NAME}
     src/utils/VulkanHelpers.cpp
     src/utils/Utils.h
     src/utils/MathUtils.h
+    src/Camera/Camera.cpp
     src/terrain/Geometry.h
     src/terrain/Geometry.cpp
     src/terrain/DiamondSquareGenerator.h

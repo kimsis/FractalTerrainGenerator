@@ -9,7 +9,7 @@ layout (location = 0) in VertexData {
 layout (binding = 1) uniform UniformBufferFrag {
 	vec4 cameraPosition;
 	vec4 materialProperties; // ka, kd, ks, alpha
-	ivec4 userInput;
+	bool drawNormals;
 } ub_data;
 
 layout (binding = 2) uniform DirectionalLight {
@@ -55,7 +55,7 @@ void main() {
 
 	out_color = vec4(color, 1.0);
 
-	if (ub_data.userInput[0] == 1) { // toggle normals
+	if (ub_data.drawNormals) {
 		vec3 scaledNormal = 0.5 * n + 0.5;
         out_color = vec4(pow(scaledNormal.x, 2.2), pow(scaledNormal.y, 2.2), pow(scaledNormal.z, 2.2), 1.0);
     }

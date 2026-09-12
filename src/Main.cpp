@@ -11,11 +11,12 @@
 #include <chrono>
 #include <future>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <vector>
 
-#include "Camera.h"
+#include "Camera/Camera.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
@@ -171,10 +172,7 @@ struct UniformBufferVert {
     /*! 0-1 float for the smooth transition between hurst/seed changes */
     float blendFactor;
 
-    /*! isBlend toggle, to avoid degenerate mixing of the same geometry in shaders.
-     *  Must be a 4-byte type: GLSL's std140 `bool` occupies a full 4-byte slot like `int`,
-     *  whereas C++'s native `bool` is 1 byte — using `bool` here leaves 3 padding bytes
-     *  uninitialized that the GPU would read as part of the same value. */
+    /*! isBlend toggle, to avoid degenerate mixing of the same geometry in shaders. */
     uint32_t isBlending;
 };
 
@@ -186,8 +184,8 @@ struct UniformBufferFrag {
      *	First three are material coefficients, the last one is specular alpha. */
     glm::vec4 materialProperties;
 
-    /*! stores user input as magic numbers */
-    glm::ivec4 userInput;
+    /*! Debug toggle for the normal-visualization branch in terrain.frag. */
+    uint32_t drawNormals;
 };
 
 /*!
@@ -241,12 +239,19 @@ struct TerrainScene {
     TerrainParams terrainParams;
     float heightScale;
     float waterLevel;
-    const char* cameraMode;
 
     float blendStartTime;
     float blendDuration = 1.0f;
 
     std::future<GeometryData> pendingTerrainGeneration;
+};
+
+/*!
+ * A raycast hit result for
+ */
+struct Hit {
+    glm::vec3 point;
+    float distance;
 };
 
 /*!
@@ -375,19 +380,20 @@ uint32_t generateRandomSeed();
 /*!
  * Builds the ImGUI Sidebar
  */
-void buildGUI(TerrainScene& scene);
+void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::vec3& cameraForward);
 
 /*!
  *	Updates the terrain scene's uniform buffers based on the current camera, and records draw calls
  *	for it into the currently recording command buffer. Must be called between
  *	vklStartRecordingCommands() and vklEndRecordingCommands().
  */
-void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera& camera);
+void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera* camera);
 
 /*!
  *	Destroys all GPU resources owned by the given terrain scene.
  */
 void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene);
+std::optional<Hit> raycastTerrain(const TerrainScene& terrainScene, const glm::vec3& origin, const glm::vec3& direction);
 
 static bool g_dragging = false;
 static bool g_strafing = false;
@@ -407,8 +413,9 @@ static int g_polygon_mode_index = 0;
 static int g_culling_index = 0;
 
 static bool g_draw_normals = false;
-static bool g_draw_fresnel = true;
-static bool g_draw_texcoords = false;
+static bool g_toggle_camera = false;
+static bool g_toggle_camera_requested = false;
+static float g_camera_speed = 5.0f;
 
 /*!
  *	A flag that will be set during initialization code.
@@ -474,8 +481,6 @@ int main(int argc, char** argv) {
         g_culling_index = 1;
     }
     g_draw_normals = renderer_reader.GetBoolean("renderer", "normals", false);
-    g_draw_fresnel = renderer_reader.GetBoolean("renderer", "fresnel", true);
-    g_draw_texcoords = renderer_reader.GetBoolean("renderer", "texcoords", false);
     bool depthtest = renderer_reader.GetBoolean("renderer", "depthtest", true);
 
     // Install a callback function, which gets invoked whenever a GLFW error occurred.
@@ -828,9 +833,9 @@ int main(int argc, char** argv) {
     /* --------------------------------------------- */
 
     // Create a camera helper object:
-    Camera camera(vklCreatePerspectiveProjectionMatrix(glm::radians(field_of_view), aspect_ratio, near_plane_distance, far_plane_distance));
-    camera.setYaw(camera_yaw);
-    camera.setPitch(camera_pitch);
+    TrackballCamera trackballCamera(field_of_view, aspect_ratio, near_plane_distance, far_plane_distance);
+    FlyCamera flyCamera(field_of_view, aspect_ratio, near_plane_distance, far_plane_distance);
+    Camera* activeCamera = &flyCamera;
 
     // Establish a callback function for handling mouse button events:
     glfwSetMouseButtonCallback(window, mouseButtonCallbackFromGlfw);
@@ -844,27 +849,87 @@ int main(int argc, char** argv) {
 
     glfwSetKeyCallback(window, handleGlfwKeyCallback);
 
-    double mouse_x, mouse_y;
+    double mouse_x, mouse_x_last, mouse_y, mouse_y_last;
+    glfwGetCursorPos(window, &mouse_x_last, &mouse_y_last);
+    double lastFrameTime = glfwGetTime();
 
     vklEnablePipelineHotReloading(window, GLFW_KEY_F5);
     while (!glfwWindowShouldClose(window)) {
+        double currentFrameTime = glfwGetTime();
+        float dt = static_cast<float>(currentFrameTime - lastFrameTime);
+        lastFrameTime = currentFrameTime;
+
         // Handle user input:
         glfwPollEvents();
         glfwGetCursorPos(window, &mouse_x, &mouse_y);
-        camera.update(mouse_x, mouse_y, g_zoom, g_dragging, g_strafing);
+        if (g_toggle_camera_requested) {
+            g_toggle_camera_requested = false;
+            if (!g_toggle_camera) {
+                // Fly camera
+                flyCamera = FlyCamera(trackballCamera);
+                activeCamera = &flyCamera;
+                g_toggle_camera = true;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            } else {
+                // Trackball camera
+                auto hit = raycastTerrain(terrain_scene, flyCamera.getPosition(), flyCamera.getForward());
+                if (hit.has_value()) {
+                    trackballCamera = TrackballCamera(flyCamera, hit->point);
+                    activeCamera = &trackballCamera;
+                    g_toggle_camera = false;
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                }
+            }
+            glfwGetCursorPos(window, &mouse_x, &mouse_y);
+            mouse_x_last = mouse_x;
+            mouse_y_last = mouse_y;
+        }
+
+        float delta_x = mouse_x - mouse_x_last;
+        float delta_y = mouse_y - mouse_y_last;
+        constexpr float kMouseSensitivity = 0.005f; // radians per pixel — tune to taste
+        float yawDelta = delta_x * kMouseSensitivity;
+        float pitchDelta = -delta_y * kMouseSensitivity;
+        // Fly: rotate unconditionally (mouselook, no button needed). Trackball: only while dragging.
+        if (g_toggle_camera || g_dragging) activeCamera->rotate((g_toggle_camera ? -1 : 1) * yawDelta, pitchDelta);
+
+        // Shift doubles the slider speed on top of it, not in place of it.
+        bool shiftHeld = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
+        activeCamera->setSpeed(g_camera_speed * (shiftHeld ? 2.0f : 1.0f));
+
+        if (g_strafing && !g_toggle_camera) {
+            constexpr float kPanSensitivity = 0.01f; // world units (pre-speed) per pixel — tune to taste
+            glm::vec3 right = trackballCamera.getRight();
+            glm::vec3 camUp = trackballCamera.getUp();
+            // Negated so dragging feels like grabbing the world: content under the cursor follows it.
+            glm::vec3 worldDelta = (-delta_x * right + delta_y * camUp) * kPanSensitivity;
+            trackballCamera.translate(worldDelta);
+        }
+
+        if (g_toggle_camera && !ImGui::GetIO().WantCaptureKeyboard) {
+            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) flyCamera.moveForward(dt);
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) flyCamera.moveBackward(dt);
+            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) flyCamera.moveLeft(dt);
+            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) flyCamera.moveRight(dt);
+            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) flyCamera.moveUp(dt);
+            if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) flyCamera.moveDown(dt);
+        }
+
+        mouse_x_last = mouse_x;
+        mouse_y_last = mouse_y;
 
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
         // ImGui::ShowDemoWindow();
-        buildGUI(terrain_scene);
+        buildGUI(terrain_scene, activeCamera->getPosition(), activeCamera->getForward());
         ImGui::Render();
 
         // Wait until we get an image from the swapchain to render into:
         vklWaitForNextSwapchainImage();
         vklStartRecordingCommands();
 
-        updateAndDrawTerrainScene(vk_device, terrain_scene, camera);
+        updateAndDrawTerrainScene(vk_device, terrain_scene, activeCamera);
 
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
 
@@ -947,12 +1012,39 @@ void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int a
     if (key == GLFW_KEY_N) {
         g_draw_normals = !g_draw_normals;
     }
-    if (key == GLFW_KEY_F) {
-        g_draw_fresnel = !g_draw_fresnel;
+    if (key == GLFW_KEY_C) {
+        g_toggle_camera_requested = true;
     }
-    if (key == GLFW_KEY_T) {
-        g_draw_texcoords = !g_draw_texcoords;
+}
+
+/*!
+ *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
+ *	mouse button input that can be processed by our application.
+ */
+void mouseButtonCallbackFromGlfw(GLFWwindow* glfw_window, int button, int action, int mods) {
+    ImGui_ImplGlfw_MouseButtonCallback(glfw_window, button, action, mods);
+    if (ImGui::GetIO().WantCaptureMouse) return;
+
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+        g_dragging = true;
+    } else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) {
+        g_dragging = false;
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
+        g_strafing = true;
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE) {
+        g_strafing = false;
     }
+}
+
+/*!
+ *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
+ *	mouse scroll input that can be processed by our application.
+ */
+void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoffset) {
+    ImGui_ImplGlfw_ScrollCallback(glfw_window, xoffset, yoffset);
+    if (ImGui::GetIO().WantCaptureMouse) return;
+
+    g_zoom -= static_cast<float>(yoffset) * 0.5f;
 }
 
 std::vector<const char*> getRequiredInstanceExtensions() {
@@ -1000,36 +1092,6 @@ uint32_t selectQueueFamilyIndex(VkPhysicalDevice physical_device, VkSurfaceKHR s
         }
     }
     VKL_EXIT_WITH_ERROR("Unable to find a suitable queue family that supports graphics and presentation on the same queue.");
-}
-
-/*!
- *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
- *	mouse button input that can be processed by our application.
- */
-void mouseButtonCallbackFromGlfw(GLFWwindow* glfw_window, int button, int action, int mods) {
-    ImGui_ImplGlfw_MouseButtonCallback(glfw_window, button, action, mods);
-    if (ImGui::GetIO().WantCaptureMouse) return;
-
-    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-        g_dragging = true;
-    } else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) {
-        g_dragging = false;
-    } else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
-        g_strafing = true;
-    } else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE) {
-        g_strafing = false;
-    }
-}
-
-/*!
- *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
- *	mouse scroll input that can be processed by our application.
- */
-void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoffset) {
-    ImGui_ImplGlfw_ScrollCallback(glfw_window, xoffset, yoffset);
-    if (ImGui::GetIO().WantCaptureMouse) return;
-
-    g_zoom -= static_cast<float>(yoffset) * 0.5f;
 }
 
 void addInstanceExtensionToVectorIfSupported(const char* extension_name, std::vector<const char*>& ref_vector) {
@@ -1347,7 +1409,6 @@ TerrainScene setupTerrainScene(
     TerrainScene scene{};
     scene.terrainParams = params;
     scene.heightScale = 1.0f;
-    scene.cameraMode = "Default";
 
     /* --------------------------------------------- */
     // Subtask 2.1: Create a Custom Graphics Pipeline
@@ -1415,7 +1476,7 @@ TerrainScene setupTerrainScene(
     return scene;
 }
 
-void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera& camera) {
+void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera* camera) {
     if (scene.pendingTerrainGeneration.valid() &&
         scene.pendingTerrainGeneration.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
         scene.blendStartTime = glfwGetTime();
@@ -1434,7 +1495,7 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
     UniformBufferVert ub_vert_data;
     ub_vert_data.modelMatrix = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, scene.heightScale));
     ub_vert_data.modelMatrixForNormals = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, 1 / scene.heightScale));
-    ub_vert_data.viewProjMatrix = camera.getViewProjectionMatrix();
+    ub_vert_data.viewProjMatrix = camera->getViewProjectionMatrix();
     ub_vert_data.blendFactor = glm::clamp((static_cast<float>(glfwGetTime()) - scene.blendStartTime) / scene.blendDuration, 0.0f, 1.0f);
     if (scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE && ub_vert_data.blendFactor >= 1.0f) {
         destroyGeometryGpuMemory(scene.terrain_geometry_from);
@@ -1444,11 +1505,9 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_vert, &ub_vert_data, sizeof(UniformBufferVert));
 
     UniformBufferFrag ub_frag_data;
-    ub_frag_data.cameraPosition = glm::vec4{camera.getPosition(), 1.0f};
+    ub_frag_data.cameraPosition = glm::vec4{camera->getPosition(), 1.0f};
     ub_frag_data.materialProperties = {CORNELL_KA, CORNELL_KD, CORNELL_KS, CORNELL_ALPHA};
-    ub_frag_data.userInput[0] = g_draw_normals ? 1 : 0;
-    ub_frag_data.userInput[1] = g_draw_fresnel ? 1 : 0;
-    ub_frag_data.userInput[2] = g_draw_texcoords ? 1 : 0;
+    ub_frag_data.drawNormals = g_draw_normals ? 1 : 0;
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_frag, &ub_frag_data, sizeof(UniformBufferFrag));
 
     VkPipeline& selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
@@ -1538,7 +1597,7 @@ void labelThenRightAlignedWidget(const char* label, float widget_width) {
     ImGui::SetNextItemWidth(widget_width);
 }
 
-void buildGUI(TerrainScene& scene) {
+void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::vec3& cameraForward) {
     const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
     const ImGuiSliderFlags flags_for_sliders = (flags & ~ImGuiSliderFlags_WrapAround);
 
@@ -1570,6 +1629,9 @@ void buildGUI(TerrainScene& scene) {
     labelThenRightAlignedWidget("Water level", kSliderWidth);
     ImGui::SliderFloat("##waterLevel", &scene.waterLevel, -20.0f, 20.0f, "%f", flags_for_sliders);
 
+    labelThenRightAlignedWidget("Camera Speed", kSliderWidth);
+    ImGui::SliderFloat("##cameraSpeed", &g_camera_speed, 1.0f, 25.0f, "%f", flags_for_sliders);
+
     std::string seed_label = "Current seed: " + std::to_string(scene.terrainParams.seed);
     float reseed_button_width = ImGui::CalcTextSize("Reseed").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     labelThenRightAlignedWidget(seed_label.c_str(), reseed_button_width);
@@ -1580,7 +1642,42 @@ void buildGUI(TerrainScene& scene) {
     }
     ImGui::EndDisabled();
 
-    ImGui::Text("Camera Mode: %s", scene.cameraMode);
+    ImGui::Text("Camera Mode: %s", g_toggle_camera ? "Fly" : "Trackball");
+    ImGui::Text("Camera Position: (%.2f, %.2f, %.2f)", cameraPosition.x, cameraPosition.y, cameraPosition.z);
+    ImGui::Text("Camera Forward:  (%.2f, %.2f, %.2f)", cameraForward.x, cameraForward.y, cameraForward.z);
+
+    ImGui::Separator();
+    ImGui::Text("Controls:");
+    ImGui::Text("C: Toggle fly/trackball camera");
+    ImGui::Text("F1: Toggle wireframe mode");
+    ImGui::Text("F2: Cycle face culling mode");
+    ImGui::Text("N: Toggle normals debug view");
+    ImGui::Text("Esc: Quit application");
+    ImGui::Text("Shift: Double camera speed");
+
+    ImGui::Separator();
+    ImGui::Text("Trackball Camera:");
+    ImGui::Text("Left-click drag: Orbit camera");
+    ImGui::Text("Right-click drag: Pan camera");
+    ImGui::Text("Scroll: Zoom (not yet wired up)");
+
+    ImGui::Separator();
+    ImGui::Text("Fly Camera:");
+    ImGui::Text("W: Move forward");
+    ImGui::Text("S: Move backward");
+    ImGui::Text("A: Strafe left");
+    ImGui::Text("D: Strafe right");
+    ImGui::Text("Space: Move up");
+    ImGui::Text("Ctrl: Move down");
 
     ImGui::End();
+}
+
+std::optional<Hit> raycastTerrain(const TerrainScene& terrainScene, const glm::vec3& origin, const glm::vec3& direction) {
+    constexpr float kGroundPlaneZ = 0.0f;
+    if (std::abs(direction.z) < 1e-6f) return std::nullopt; // ray parallel to the plane — never hits
+    float t = (kGroundPlaneZ - origin.z) / direction.z;
+    if (t < 0.0f) return std::nullopt; // plane is behind the camera
+    glm::vec3 point = origin + t * direction;
+    return Hit{point, t};
 }
