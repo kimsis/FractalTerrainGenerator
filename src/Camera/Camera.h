@@ -94,6 +94,9 @@ class TrackballCamera : public Camera {
     /*! Camera-relative "up" axis (not the same as world `up` in general). */
     glm::vec3 getUp() const;
 
+    /*! Changes the distance from target, without moving target itself. */
+    void zoom(float delta);
+
    private:
     /*! The camera's current position on the orbit, derived from target/radius/yaw/pitch. */
     glm::vec3 computeOrbitPosition() const;

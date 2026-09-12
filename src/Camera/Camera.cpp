@@ -62,6 +62,8 @@ void TrackballCamera::translate(const glm::vec3& delta) {
     target += scaledDelta;
 }
 
+void TrackballCamera::zoom(float delta) { radius = glm::max(radius - delta * speed, 0.1f); }
+
 glm::vec3 TrackballCamera::computeOrbitPosition() const {
     return target + radius * glm::vec3(glm::cos(pitch) * glm::cos(yaw), glm::cos(pitch) * glm::sin(yaw), glm::sin(pitch));
 }

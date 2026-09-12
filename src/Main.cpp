@@ -395,7 +395,7 @@ std::optional<Hit> raycastTerrain(const TerrainScene& terrainScene, const glm::v
 
 static bool g_dragging = false;
 static bool g_strafing = false;
-static float g_zoom = 5.0f;
+static float g_scroll_delta = 0.0f;
 
 /*!
  *	0 ... fill polygons
@@ -890,6 +890,12 @@ int main(int argc, char** argv) {
             trackballCamera.translate(worldDelta);
         }
 
+        if (!g_toggle_camera && g_scroll_delta != 0.0f) {
+            constexpr float kScrollSensitivity = 0.5f;
+            trackballCamera.zoom(g_scroll_delta * kScrollSensitivity);
+        }
+        g_scroll_delta = 0.0f;
+
         if (g_toggle_camera && !ImGui::GetIO().WantCaptureKeyboard) {
             if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) flyCamera.moveForward(dt);
             if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) flyCamera.moveBackward(dt);
@@ -1028,7 +1034,7 @@ void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoff
     ImGui_ImplGlfw_ScrollCallback(glfw_window, xoffset, yoffset);
     if (ImGui::GetIO().WantCaptureMouse) return;
 
-    g_zoom -= static_cast<float>(yoffset) * 0.5f;
+    g_scroll_delta += static_cast<float>(yoffset);
 }
 
 std::vector<const char*> getRequiredInstanceExtensions() {
@@ -1631,7 +1637,7 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     ImGui::Text("Trackball Camera:");
     ImGui::Text("Left-click drag: Orbit camera");
     ImGui::Text("Right-click drag: Pan camera");
-    ImGui::Text("Scroll: Zoom (not yet wired up)");
+    ImGui::Text("Scroll: Zoom in/out");
 
     ImGui::Separator();
     ImGui::Text("Fly Camera:");
