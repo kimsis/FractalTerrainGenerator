@@ -7,6 +7,7 @@
  */
 #include <vulkan/vulkan.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <future>
@@ -15,6 +16,7 @@
 #include <random>
 #include <sstream>
 #include <vector>
+#include <vulkan/vulkan.hpp> // for vk::OutOfDateKHRError, thrown by the framework's internal vulkan-hpp calls on resize
 
 #include "Camera/Camera.h"
 #include "imgui.h"
@@ -329,6 +331,41 @@ void mouseButtonCallbackFromGlfw(GLFWwindow* glfw_window, int button, int action
 void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoffset);
 
 /*!
+ *	This callback function gets invoked by GLFW during glfwPollEvents() whenever the window's
+ *	framebuffer size changes (resize, maximize, restore, or a DPI change moving it to a different
+ *	monitor). Only sets a flag — actually recreating the swapchain happens once per frame in the
+ *	render loop, where the Vulkan objects it needs are in scope.
+ */
+void framebufferSizeCallbackFromGlfw(GLFWwindow* glfw_window, int width, int height);
+
+/*!
+ *	Recreates the swapchain, depth buffer, and every pipeline against the window's current
+ *	framebuffer size. Blocks (via glfwWaitEvents()) while the window is minimized. Takes mutable
+ *	references to the Vulkan objects and cameras it needs to replace/update in place, since they
+ *	live as locals in main().
+ */
+void recreateSwapchainAndDependents(
+    GLFWwindow* window,
+    VkInstance vk_instance,
+    VkPhysicalDevice vk_physical_device,
+    VkDevice vk_device,
+    VkQueue vk_queue,
+    uint32_t selected_queue_family_index,
+    VkSurfaceKHR vk_surface,
+    VkSurfaceFormatKHR surface_format,
+    bool depthtest,
+    VkClearValue color_clear_value,
+    VkClearValue depth_clear_value,
+    VkSwapchainKHR& vk_swapchain,
+    VkImage& depth_buffer,
+    std::vector<VkImage>& swapchain_image_handles,
+    int& window_width,
+    int& window_height,
+    TrackballCamera& trackballCamera,
+    FlyCamera& flyCamera
+);
+
+/*!
  *	Bind the given descriptor se to use the material it represents for subsequent draw calls
  *	with the given pipeline, and render the given geometry (using its vertex and index buffers).
  *	Record everything into the current command buffer as provided by the framework.
@@ -446,6 +483,7 @@ void cleanupWaterScene(VkDevice vk_device, WaterScene& scene);
 static bool g_dragging = false;
 static bool g_strafing = false;
 static float g_scroll_delta = 0.0f;
+static bool g_framebuffer_resized = false;
 
 /*!
  *	0 ... fill polygons
@@ -549,6 +587,7 @@ int main(int argc, char** argv) {
 
     // Set some window settings before creating the window:
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API); // No need to create a graphics context for Vulkan
+    // Made resizable later, via glfwSetWindowAttrib, once the main render loop is ready for it.
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     GLFWwindow* window = nullptr;
@@ -740,6 +779,19 @@ int main(int argc, char** argv) {
     queueFamilyIndices.push_back(selected_queue_family_index);
     queueFamilyIndexCount = 1u;
     VkSurfaceCapabilitiesKHR surface_capabilities = getPhysicalDeviceSurfaceCapabilities(vk_physical_device, vk_surface);
+    // Clamp to what the surface actually reports; the window manager doesn't always honor the
+    // requested width/height exactly.
+    if (surface_capabilities.currentExtent.width != UINT32_MAX) {
+        window_width = static_cast<int>(surface_capabilities.currentExtent.width);
+        window_height = static_cast<int>(surface_capabilities.currentExtent.height);
+    } else {
+        window_width = static_cast<int>(
+            std::clamp(static_cast<uint32_t>(window_width), surface_capabilities.minImageExtent.width, surface_capabilities.maxImageExtent.width)
+        );
+        window_height = static_cast<int>(
+            std::clamp(static_cast<uint32_t>(window_height), surface_capabilities.minImageExtent.height, surface_capabilities.maxImageExtent.height)
+        );
+    }
     // Build the swapchain config struct:
     VkSwapchainCreateInfoKHR swapchain_create_info = {};
     swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -866,12 +918,10 @@ int main(int argc, char** argv) {
         setupTerrainScene(vk_device, vk_queue, selected_queue_family_index, initial_terrain_geometry, initial_terrain_params);
 
     int initial_terrain_size = (1 << initial_terrain_params.gridSizeExponent) + 1;
-    terrain_scene.waterLevel = (
-        initial_terrain_geometry.positions[0].z +
-        initial_terrain_geometry.positions[initial_terrain_size - 1].z +
-        initial_terrain_geometry.positions[(initial_terrain_size - 1) * initial_terrain_size].z +
-        initial_terrain_geometry.positions[initial_terrain_size * initial_terrain_size - 1].z
-    ) / 4.0f;
+    terrain_scene.waterLevel = (initial_terrain_geometry.positions[0].z + initial_terrain_geometry.positions[initial_terrain_size - 1].z +
+                                initial_terrain_geometry.positions[(initial_terrain_size - 1) * initial_terrain_size].z +
+                                initial_terrain_geometry.positions[initial_terrain_size * initial_terrain_size - 1].z) /
+                               4.0f;
 
     WaterScene water_scene = setupWaterScene(vk_device, initial_terrain_params);
 
@@ -884,11 +934,15 @@ int main(int argc, char** argv) {
     FlyCamera flyCamera(field_of_view, aspect_ratio, near_plane_distance, far_plane_distance);
     Camera* activeCamera = &trackballCamera;
 
-    // Establish a callback function for handling mouse button events:
+    // Callback function for handling mouse button events:
     glfwSetMouseButtonCallback(window, mouseButtonCallbackFromGlfw);
 
-    // Establish a callback function for handling mouse scroll events:
+    // Callback function for handling mouse scroll events:
     glfwSetScrollCallback(window, scrollCallbackFromGlfw);
+
+    // Callback function for handling window resize events:
+    glfwSetFramebufferSizeCallback(window, framebufferSizeCallbackFromGlfw);
+
     /* --------------------------------------------- */
     // Subtask 1.10: Set-up the Render Loop
     // Subtask 1.11: Register a Key Callback
@@ -901,6 +955,9 @@ int main(int argc, char** argv) {
     double lastFrameTime = glfwGetTime();
 
     vklEnablePipelineHotReloading(window, GLFW_KEY_F5);
+
+    glfwSetWindowAttrib(window, GLFW_RESIZABLE, GLFW_TRUE);
+
     while (!glfwWindowShouldClose(window)) {
         double currentFrameTime = glfwGetTime();
         float dt = static_cast<float>(currentFrameTime - lastFrameTime);
@@ -908,6 +965,33 @@ int main(int argc, char** argv) {
 
         // Handle user input:
         glfwPollEvents();
+
+        int current_fb_width, current_fb_height;
+        glfwGetFramebufferSize(window, &current_fb_width, &current_fb_height);
+        if (g_framebuffer_resized || current_fb_width != window_width || current_fb_height != window_height) {
+            g_framebuffer_resized = false;
+            recreateSwapchainAndDependents(
+                window,
+                vk_instance,
+                vk_physical_device,
+                vk_device,
+                vk_queue,
+                selected_queue_family_index,
+                vk_surface,
+                surface_format,
+                depthtest,
+                color_clear_value,
+                depth_clear_value,
+                vk_swapchain,
+                depth_buffer,
+                swapchain_image_handles,
+                window_width,
+                window_height,
+                trackballCamera,
+                flyCamera
+            );
+        }
+
         glfwGetCursorPos(window, &mouse_x, &mouse_y);
         if (g_toggle_camera_requested) {
             g_toggle_camera_requested = false;
@@ -974,7 +1058,31 @@ int main(int argc, char** argv) {
         ImGui::Render();
 
         // Wait until we get an image from the swapchain to render into:
-        vklWaitForNextSwapchainImage();
+        try {
+            vklWaitForNextSwapchainImage();
+        } catch (const vk::OutOfDateKHRError&) {
+            recreateSwapchainAndDependents(
+                window,
+                vk_instance,
+                vk_physical_device,
+                vk_device,
+                vk_queue,
+                selected_queue_family_index,
+                vk_surface,
+                surface_format,
+                depthtest,
+                color_clear_value,
+                depth_clear_value,
+                vk_swapchain,
+                depth_buffer,
+                swapchain_image_handles,
+                window_width,
+                window_height,
+                trackballCamera,
+                flyCamera
+            );
+            continue;
+        }
         vklStartRecordingCommands();
 
         updateAndDrawTerrainScene(vk_device, terrain_scene, activeCamera);
@@ -983,8 +1091,33 @@ int main(int argc, char** argv) {
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
 
         vklEndRecordingCommands();
+
         // Present rendered image to the screen:
-        vklPresentCurrentSwapchainImage();
+        try {
+            vklPresentCurrentSwapchainImage();
+        } catch (const vk::OutOfDateKHRError&) {
+            recreateSwapchainAndDependents(
+                window,
+                vk_instance,
+                vk_physical_device,
+                vk_device,
+                vk_queue,
+                selected_queue_family_index,
+                vk_surface,
+                surface_format,
+                depthtest,
+                color_clear_value,
+                depth_clear_value,
+                vk_swapchain,
+                depth_buffer,
+                swapchain_image_handles,
+                window_width,
+                window_height,
+                trackballCamera,
+                flyCamera
+            );
+            continue;
+        }
 
         if (cmdline_args.run_headless) {
             uint32_t idx = vklGetCurrentSwapChainImageIndex();
@@ -1042,6 +1175,125 @@ int main(int argc, char** argv) {
 
 void errorCallbackFromGlfw(int error, const char* description) { std::cout << "GLFW error " << error << ": " << description << std::endl; }
 
+void recreateSwapchainAndDependents(
+    GLFWwindow* window,
+    VkInstance vk_instance,
+    VkPhysicalDevice vk_physical_device,
+    VkDevice vk_device,
+    VkQueue vk_queue,
+    uint32_t selected_queue_family_index,
+    VkSurfaceKHR vk_surface,
+    VkSurfaceFormatKHR surface_format,
+    bool depthtest,
+    VkClearValue color_clear_value,
+    VkClearValue depth_clear_value,
+    VkSwapchainKHR& vk_swapchain,
+    VkImage& depth_buffer,
+    std::vector<VkImage>& swapchain_image_handles,
+    int& window_width,
+    int& window_height,
+    TrackballCamera& trackballCamera,
+    FlyCamera& flyCamera
+) {
+    int fb_width = 0, fb_height = 0;
+    glfwGetFramebufferSize(window, &fb_width, &fb_height);
+    while (fb_width == 0 || fb_height == 0) {
+        // Minimized: block until the window is restored.
+        glfwGetFramebufferSize(window, &fb_width, &fb_height);
+        glfwWaitEvents();
+    }
+
+    vkDeviceWaitIdle(vk_device);
+
+    vklDestroyDeviceLocalImageAndItsBackingMemory(depth_buffer);
+    VkSwapchainKHR old_swapchain = vk_swapchain;
+    vklDestroyFramework();
+
+    VkSurfaceCapabilitiesKHR new_surface_capabilities = getPhysicalDeviceSurfaceCapabilities(vk_physical_device, vk_surface);
+    VkExtent2D new_extent;
+    if (new_surface_capabilities.currentExtent.width != UINT32_MAX) {
+        new_extent = new_surface_capabilities.currentExtent;
+    } else {
+        new_extent.width =
+            std::clamp(static_cast<uint32_t>(fb_width), new_surface_capabilities.minImageExtent.width, new_surface_capabilities.maxImageExtent.width);
+        new_extent.height = std::clamp(
+            static_cast<uint32_t>(fb_height),
+            new_surface_capabilities.minImageExtent.height,
+            new_surface_capabilities.maxImageExtent.height
+        );
+    }
+
+    VkSwapchainCreateInfoKHR new_swapchain_create_info = {};
+    new_swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    new_swapchain_create_info.surface = vk_surface;
+    new_swapchain_create_info.minImageCount = new_surface_capabilities.minImageCount;
+    new_swapchain_create_info.imageArrayLayers = 1u;
+    new_swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if (new_surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
+        new_swapchain_create_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
+    new_swapchain_create_info.preTransform = new_surface_capabilities.currentTransform;
+    new_swapchain_create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    new_swapchain_create_info.clipped = VK_TRUE;
+    new_swapchain_create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    new_swapchain_create_info.queueFamilyIndexCount = 1u;
+    new_swapchain_create_info.pQueueFamilyIndices = &selected_queue_family_index;
+    new_swapchain_create_info.imageFormat = surface_format.format;
+    new_swapchain_create_info.imageColorSpace = surface_format.colorSpace;
+    new_swapchain_create_info.imageExtent = new_extent;
+    new_swapchain_create_info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    new_swapchain_create_info.oldSwapchain = old_swapchain;
+
+    VkResult swap_result = vkCreateSwapchainKHR(vk_device, &new_swapchain_create_info, nullptr, &vk_swapchain);
+    VKL_CHECK_VULKAN_RESULT(swap_result);
+    vkDestroySwapchainKHR(vk_device, old_swapchain, nullptr);
+
+    uint32_t new_swapchain_image_count;
+    vkGetSwapchainImagesKHR(vk_device, vk_swapchain, &new_swapchain_image_count, nullptr);
+    swapchain_image_handles.resize(new_swapchain_image_count);
+    vkGetSwapchainImagesKHR(vk_device, vk_swapchain, &new_swapchain_image_count, swapchain_image_handles.data());
+
+    depth_buffer = vklCreateDeviceLocalImageWithBackingMemory(
+        vk_physical_device,
+        vk_device,
+        static_cast<int>(new_extent.width),
+        static_cast<int>(new_extent.height),
+        VK_FORMAT_D32_SFLOAT,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+    );
+
+    VklSwapchainConfig new_swapchain_config = {};
+    new_swapchain_config.swapchainHandle = vk_swapchain;
+    new_swapchain_config.imageExtent = new_extent;
+    for (const VkImage& img : swapchain_image_handles) {
+        VklSwapchainFramebufferComposition framebufferComposition;
+        framebufferComposition.colorAttachmentImageDetails.imageHandle = img;
+        framebufferComposition.colorAttachmentImageDetails.imageFormat = new_swapchain_create_info.imageFormat;
+        framebufferComposition.colorAttachmentImageDetails.imageUsage = new_swapchain_create_info.imageUsage;
+        framebufferComposition.colorAttachmentImageDetails.clearValue = color_clear_value;
+        if (depthtest) {
+            framebufferComposition.depthAttachmentImageDetails.imageHandle = depth_buffer;
+            framebufferComposition.depthAttachmentImageDetails.imageFormat = VK_FORMAT_D32_SFLOAT;
+            framebufferComposition.depthAttachmentImageDetails.imageUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+            framebufferComposition.depthAttachmentImageDetails.clearValue = depth_clear_value;
+        }
+        new_swapchain_config.swapchainImages.push_back(framebufferComposition);
+    }
+
+    if (!vklInitFramework(vk_instance, vk_surface, vk_physical_device, vk_device, vk_queue, new_swapchain_config)) {
+        VKL_EXIT_WITH_ERROR("Failed to reinit framework after window resize");
+    }
+
+    // Rebuilds every registered pipeline against the fresh render pass and extent:
+    vklHotReloadPipelines();
+
+    window_width = static_cast<int>(new_extent.width);
+    window_height = static_cast<int>(new_extent.height);
+    float new_aspect_ratio = static_cast<float>(new_extent.width) / static_cast<float>(new_extent.height);
+    trackballCamera.setAspectRatio(new_aspect_ratio);
+    flyCamera.setAspectRatio(new_aspect_ratio);
+}
+
 void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int action, int mods) {
     ImGui_ImplGlfw_KeyCallback(glfw_window, key, scancode, action, mods);
     if (ImGui::GetIO().WantCaptureKeyboard) return;
@@ -1096,6 +1348,8 @@ void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoff
 
     g_scroll_delta += static_cast<float>(yoffset);
 }
+
+void framebufferSizeCallbackFromGlfw(GLFWwindow* glfw_window, int width, int height) { g_framebuffer_resized = true; }
 
 std::vector<const char*> getRequiredInstanceExtensions() {
     std::vector<const char*> required_extensions;
@@ -1527,12 +1781,9 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
         vkDeviceWaitIdle(vk_device);
 
         int size = (1 << scene.terrainParams.gridSizeExponent) + 1;
-        scene.waterLevel = (
-            new_terrain_geometry_data.positions[0].z +
-            new_terrain_geometry_data.positions[size - 1].z +
-            new_terrain_geometry_data.positions[(size - 1) * size].z +
-            new_terrain_geometry_data.positions[size * size - 1].z
-        ) / 4.0f;
+        scene.waterLevel = (new_terrain_geometry_data.positions[0].z + new_terrain_geometry_data.positions[size - 1].z +
+                            new_terrain_geometry_data.positions[(size - 1) * size].z + new_terrain_geometry_data.positions[size * size - 1].z) /
+                           4.0f;
 
         if (scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE) {
             destroyGeometryGpuMemory(scene.terrain_geometry_from);
