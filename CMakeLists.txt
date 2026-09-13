@@ -93,6 +93,9 @@ add_executable(${PROJECT_NAME}
     src/terrain/Geometry.cpp
     src/terrain/DiamondSquareGenerator.h
     src/terrain/DiamondSquareGenerator.cpp
+    src/terrain/ChunkCoord.h
+    src/terrain/ChunkManager.h
+    src/terrain/ChunkManager.cpp
     ${IMGUI_DIR}/imgui_demo.cpp
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp

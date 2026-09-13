@@ -22,6 +22,7 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
+#include "terrain/ChunkManager.h"
 #include "terrain/DiamondSquareGenerator.h"
 #include "terrain/Geometry.h"
 #include "utils/PathUtils.h"
@@ -503,6 +504,8 @@ static bool g_toggle_camera = false;
 static bool g_toggle_camera_requested = false;
 static bool g_reseed_requested = false;
 static float g_camera_speed = 5.0f;
+static int g_chunk_view_radius = 8;
+static bool g_chunk_view_radius_changed = false;
 
 /*!
  *	A flag that will be set during initialization code.
@@ -918,6 +921,13 @@ int main(int argc, char** argv) {
 
     WaterScene water_scene = setupWaterScene(vk_device, initial_terrain_params);
 
+    ChunkManager chunk_manager;
+    chunk_manager.baseParams.gridSizeExponent = 4; // size=17 (16x16 cells), small/fast per chunk
+    chunk_manager.baseParams.hurst = initial_terrain_params.hurst;
+    chunk_manager.baseParams.seed = initial_terrain_params.seed;
+    chunk_manager.baseParams.initialVariance = initial_terrain_params.initialVariance;
+    chunk_manager.viewRadius = g_chunk_view_radius; // subsequent changes applied on slider release, below
+
     /* --------------------------------------------- */
     // Camera
     /* --------------------------------------------- */
@@ -1020,6 +1030,34 @@ int main(int argc, char** argv) {
             if (!terrain_scene.pendingTerrainGeneration.valid()) {
                 terrain_scene.terrainParams.seed = generateRandomSeed();
                 terrain_scene.pendingTerrainGeneration = startTerrainGeneration(terrain_scene.terrainParams);
+            }
+        }
+
+        if (g_chunk_view_radius_changed) {
+            g_chunk_view_radius_changed = false;
+            chunk_manager.viewRadius = g_chunk_view_radius;
+        }
+        updateLoadedChunks(chunk_manager, activeCamera->getPosition());
+        {
+            static size_t last_loaded = SIZE_MAX;
+            static size_t last_pending = SIZE_MAX;
+            if (chunk_manager.loadedChunks.size() != last_loaded || chunk_manager.pendingChunks.size() != last_pending) {
+                last_loaded = chunk_manager.loadedChunks.size();
+                last_pending = chunk_manager.pendingChunks.size();
+                ChunkCoord cc = cameraToChunkCoord(activeCamera->getPosition(), chunk_manager.baseParams);
+                glm::vec3 camPos = activeCamera->getPosition();
+                fprintf(
+                    stderr,
+                    "DIAGNOSTIC: pos=(%.1f,%.1f,%.1f) camMode=%s cameraChunk=(%d,%d) loaded=%zu pending=%zu\n",
+                    camPos.x,
+                    camPos.y,
+                    camPos.z,
+                    g_toggle_camera ? "fly" : "trackball",
+                    cc.cx,
+                    cc.cy,
+                    last_loaded,
+                    last_pending
+                );
             }
         }
 
@@ -1154,6 +1192,7 @@ int main(int argc, char** argv) {
     vklDestroyDeviceLocalImageAndItsBackingMemory(depth_buffer);
     cleanupTerrainScene(vk_device, terrain_scene);
     cleanupWaterScene(vk_device, water_scene);
+    cleanupChunkManager(chunk_manager);
 
     /* --------------------------------------------- */
     // Dear ImGui: shutdown
@@ -2054,6 +2093,12 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
 
     labelThenRightAlignedWidget("Camera Speed", kSliderWidth);
     ImGui::SliderFloat("##cameraSpeed", &g_camera_speed, 1.0f, 25.0f, "%f", flags_for_sliders);
+
+    labelThenRightAlignedWidget("View Radius", kSliderWidth);
+    ImGui::SliderInt("##viewRadius", &g_chunk_view_radius, 1, 32, "%d", flags_for_sliders);
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        g_chunk_view_radius_changed = true;
+    }
 
     std::string seed_label = "Current seed: " + std::to_string(scene.terrainParams.seed);
     float reseed_button_width = ImGui::CalcTextSize("Reseed").x + ImGui::GetStyle().FramePadding.x * 2.0f;
