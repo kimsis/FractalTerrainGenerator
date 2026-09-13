@@ -42,3 +42,8 @@ template <typename T>
 inline T& at(std::vector<T>& heights, int size, int x, int y) {
     return heights[x * size + y];
 }
+
+template <typename T>
+inline const T& at(const std::vector<T>& heights, int size, int x, int y) {
+    return heights[x * size + y];
+}

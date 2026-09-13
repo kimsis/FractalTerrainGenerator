@@ -13,16 +13,17 @@
 #include "../utils/Utils.h"
 #include "DiamondSquareGenerator.h"
 
+// Phase 1 of terrain generation: heights + positions + indices only, no normals. This is the part
+// that's fully independent between chunks — a pure function of (seed, global coords, level) — so
+// it can run on a background thread with zero cross-chunk communication. Normals are derived in a
+// separate, dependency-aware phase 2 once neighboring chunks' phase 1 data is available (see
+// deriveTerrainNormals() and ChunkManager's updateLoadedChunks()), instead of regenerating full
+// throwaway neighbor grids just to read a boundary row/column from them.
 GeometryData generateTerrainGeometry(const TerrainParams& params) {
     GeometryData data;
     DiamondSquareGenerator generator(params);
-
     data.positions = generator.getPositions();
-
-    data.normals = generator.getNormals();
-
     data.indices = generator.getIndices();
-
     return data;
 }
 

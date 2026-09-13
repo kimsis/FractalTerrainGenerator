@@ -18,7 +18,6 @@ void DiamondSquareGenerator::SetParams(const TerrainParams& newParams) {
 }
 const TerrainParams& DiamondSquareGenerator::GetParams() const { return params; };
 const std::vector<uint32_t>& DiamondSquareGenerator::getIndices() const { return indices; };
-const std::vector<glm::vec3>& DiamondSquareGenerator::getNormals() const { return normals; };
 const std::vector<glm::vec3>& DiamondSquareGenerator::getPositions() const { return positions; };
 const int DiamondSquareGenerator::getWorldGridX(int x) const { return params.chunkX * (size - 1) + x; };
 const int DiamondSquareGenerator::getWorldGridY(int y) const { return params.chunkY * (size - 1) + y; };
@@ -58,7 +57,7 @@ void DiamondSquareGenerator::GenerateHeightMap() {
     int step = size - 1;
     // Init corner values, a.k.a. square step 0
     float variance = varianceAt(0, params.hurst, params.initialVariance);
-    at(heights, size, 0, 0) = batesOffset(params.seed, 0, 0, 0, variance);
+    at(heights, size, 0, 0) = batesOffset(params.seed, getWorldGridX(0), getWorldGridY(0), 0, variance);
     at(heights, size, 0, step) = batesOffset(params.seed, getWorldGridX(0), getWorldGridY(step), 0, variance);
     at(heights, size, step, 0) = batesOffset(params.seed, getWorldGridX(step), getWorldGridY(0), 0, variance);
     at(heights, size, step, step) = batesOffset(params.seed, getWorldGridX(step), getWorldGridY(step), 0, variance);
@@ -114,44 +113,10 @@ void DiamondSquareGenerator::GeneratePositions() {
     if (heights.empty()) GenerateHeightMap();
     for (int x = 0; x < size; x++) {
         for (int y = 0; y < size; y++) {
-            float worldX = (getWorldGridX(x) - size / 2.0f) * params.spacing;
-            float worldY = (getWorldGridY(y) - size / 2.0f) * params.spacing;
+            float worldX = (getWorldGridX(x) - (size - 1) / 2.0f) * params.spacing;
+            float worldY = (getWorldGridY(y) - (size - 1) / 2.0f) * params.spacing;
             float worldZ = at(heights, size, x, y);
             at(positions, size, x, y) = glm::vec3(worldX, worldY, worldZ);
-        }
-    }
-}
-
-void DiamondSquareGenerator::DerriveNormals() {
-    normals.resize(size * size);
-    if (heights.empty()) GenerateHeightMap();
-    for (int x = 0; x < size; x++) {
-        for (int y = 0; y < size; y++) {
-            int neighboursCount = 0;
-            float dzdx = 0.0f;
-            if (x > 0) {
-                dzdx -= at(heights, size, x - 1, y);
-                neighboursCount++;
-            }
-            if (x < size - 1) {
-                dzdx += at(heights, size, x + 1, y);
-                neighboursCount++;
-            }
-            dzdx /= (neighboursCount * params.spacing);
-            neighboursCount = 0;
-            float dzdy = 0.0f;
-            if (y > 0) {
-                dzdy -= at(heights, size, x, y - 1);
-                neighboursCount++;
-            }
-            if (y < size - 1) {
-                dzdy += at(heights, size, x, y + 1);
-                neighboursCount++;
-            }
-            dzdy /= (neighboursCount * params.spacing);
-            // Cross product of both derivatives
-            glm::vec3 normal(-dzdx, -dzdy, 1);
-            at(normals, size, x, y) = glm::normalize(normal);
         }
     }
 }
@@ -160,7 +125,42 @@ void DiamondSquareGenerator::ComputeTerrain() {
     size = (1 << params.gridSizeExponent) + 1;
     GenerateHeightMap();
     GeneratePositions();
-    DerriveNormals();
+}
+
+std::vector<glm::vec3> deriveTerrainNormals(
+    const std::vector<glm::vec3>& positions,
+    int size,
+    int spacing,
+    const std::vector<float>* leftSkirt,
+    const std::vector<float>* rightSkirt,
+    const std::vector<float>* topSkirt,
+    const std::vector<float>* bottomSkirt
+) {
+    std::vector<glm::vec3> normals(size * size);
+    for (int x = 0; x < size; x++) {
+        for (int y = 0; y < size; y++) {
+            float here = at(positions, size, x, y).z;
+
+            // At a chunk edge, prefer the real neighbor value (borrowed from that neighbor's
+            // already-computed positions) if we have one; otherwise fall back to linearly
+            // extrapolating through this cell from the real neighbor on the other side — used only
+            // when that side's neighbor genuinely doesn't exist (outside the loaded view radius).
+            float left = (x > 0) ? at(positions, size, x - 1, y).z : leftSkirt ? (*leftSkirt)[y] : 2.0f * here - at(positions, size, x + 1, y).z;
+            float right = (x < size - 1) ? at(positions, size, x + 1, y).z
+                          : rightSkirt   ? (*rightSkirt)[y]
+                                         : 2.0f * here - at(positions, size, x - 1, y).z;
+            float dzdx = (right - left) / (2.0f * spacing);
+
+            float down = (y > 0) ? at(positions, size, x, y - 1).z : bottomSkirt ? (*bottomSkirt)[x] : 2.0f * here - at(positions, size, x, y + 1).z;
+            float up = (y < size - 1) ? at(positions, size, x, y + 1).z : topSkirt ? (*topSkirt)[x] : 2.0f * here - at(positions, size, x, y - 1).z;
+            float dzdy = (up - down) / (2.0f * spacing);
+
+            // Cross product of both derivatives
+            glm::vec3 normal(-dzdx, -dzdy, 1);
+            normals[x * size + y] = glm::normalize(normal);
+        }
+    }
+    return normals;
 }
 
 DiamondSquareGenerator::~DiamondSquareGenerator() {}

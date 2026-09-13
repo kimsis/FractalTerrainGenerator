@@ -248,16 +248,11 @@ struct TerrainScene {
     VkBuffer ub_terrain_vert;
     VkBuffer ub_terrain_frag;
     VkDescriptorSet ds_terrain;
-    Geometry terrain_geometry_from;
-    Geometry terrain_geometry_to;
-    TerrainParams terrainParams;
+
+    ChunkManager chunkManager;
+
     float heightScale;
     float waterLevel;
-
-    float blendStartTime;
-    float blendDuration = 1.0f;
-
-    std::future<GeometryData> pendingTerrainGeneration;
 };
 
 /*!
@@ -391,24 +386,11 @@ void drawGeometryWithMaterial(
 VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_index, size_t cull_mode_index);
 
 /*!
- *	Creates every pipeline, geometry, uniform buffer, descriptor set, and texture that the terrain
- *	scene consists of. Takes already-generated terrain geometry data rather than generating it itself,
- *	so the (potentially slow) CPU generation can happen elsewhere — e.g. on a background thread while
- *	a loading screen keeps the window responsive — before this is called.
+ *	Creates the shared pipeline, uniform buffers, and descriptor set that every loaded chunk is
+ *	drawn with, and configures the scene's ChunkManager from params. Chunk geometry itself is
+ *	generated/uploaded on demand, driven by the camera — not by this one-time setup call.
  */
-TerrainScene setupTerrainScene(
-    VkDevice vk_device,
-    VkQueue vk_queue,
-    uint32_t selected_queue_family_index,
-    const GeometryData& terrain_geometry_data,
-    TerrainParams& params
-);
-
-/*!
- *	Builds a minimal ImGui panel shown while terrain is generating in the background, before the
- *	real terrain scene (and its controls) exist yet.
- */
-void buildLoadingGUI();
+TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, TerrainParams& params);
 
 /*!
  *	Kicks off terrain generation for the given params on a background thread and returns immediately
@@ -419,12 +401,18 @@ void buildLoadingGUI();
 std::future<GeometryData> startTerrainGeneration(const TerrainParams& params);
 
 /*!
- *	Generates terrain geometry for the given params, blocking the caller until it's done, while keeping
- *	the window responsive (polling events and drawing a loading screen) for however long that takes.
- *	Built on top of startTerrainGeneration — use this specifically when there's nothing else to show
- *	yet (e.g. the very first, initial generation at startup).
+ *	Builds a minimal ImGui panel shown while the initial chunks are generating, before the real
+ *	terrain scene's own controls exist yet.
  */
-GeometryData generateTerrainGeometryWithLoadingScreen(const TerrainParams& params);
+void buildLoadingGUI(size_t pendingChunkCount);
+
+/*!
+ *	Blocks until every chunk in the initial (2 * viewRadius + 1)^2 window around cameraPos has been
+ *	generated and uploaded, while keeping the window responsive (polling events and drawing a
+ *	loading screen) for however long that takes. Use this once, at startup, before the main render
+ *	loop begins — per-frame streaming (updateLoadedChunks) takes over from there.
+ */
+void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& chunkManager, const glm::vec3& cameraPos);
 
 /*!
  *	Prints `label`, then positions the cursor so the widget that follows always ends flush with the
@@ -461,7 +449,7 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
  *	Destroys all GPU resources owned by the given terrain scene.
  */
 void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene);
-std::optional<Hit> raycastTerrain(const TerrainScene& terrainScene, const glm::vec3& origin, const glm::vec3& direction);
+std::optional<Hit> raycastTerrain(const glm::vec3& origin, const glm::vec3& direction);
 
 /*!
  *	Builds the water plane's single quad (spanning the terrain's fixed XY footprint at local z=0),
@@ -828,6 +816,21 @@ int main(int argc, char** argv) {
     VKL_LOG("Subtask 1.8 done.");
 
     /* --------------------------------------------- */
+    // Camera
+    /* --------------------------------------------- */
+
+    // Create a camera helper object, positioned/oriented per camera_terrain.ini. The trackball
+    // camera's target is derived by raycasting the configured position/direction against the
+    // terrain (same conversion used for live trackball<->fly switching further below), falling
+    // back to the origin if that ray doesn't hit the terrain (e.g. looking up).
+    FlyCamera flyCamera(field_of_view, aspect_ratio, near_plane_distance, far_plane_distance);
+    flyCamera.translate(camera_position);
+    flyCamera.rotate(glm::radians(camera_yaw), glm::radians(camera_pitch));
+    auto initial_hit = raycastTerrain(flyCamera.getPosition(), flyCamera.getForward());
+    TrackballCamera trackballCamera(flyCamera, initial_hit.has_value() ? initial_hit->point : glm::vec3(0.0f, 0.0f, 0.0f));
+    Camera* activeCamera = &trackballCamera;
+
+    /* --------------------------------------------- */
     // Depth Test
     /* --------------------------------------------- */
     VkImage depth_buffer = vklCreateDeviceLocalImageWithBackingMemory(
@@ -908,40 +911,10 @@ int main(int argc, char** argv) {
     // Set up the Scene
     /* --------------------------------------------- */
     TerrainParams initial_terrain_params;
-    GeometryData initial_terrain_geometry = generateTerrainGeometryWithLoadingScreen(initial_terrain_params);
-
-    TerrainScene terrain_scene =
-        setupTerrainScene(vk_device, vk_queue, selected_queue_family_index, initial_terrain_geometry, initial_terrain_params);
-
-    int initial_terrain_size = (1 << initial_terrain_params.gridSizeExponent) + 1;
-    terrain_scene.waterLevel = (initial_terrain_geometry.positions[0].z + initial_terrain_geometry.positions[initial_terrain_size - 1].z +
-                                initial_terrain_geometry.positions[(initial_terrain_size - 1) * initial_terrain_size].z +
-                                initial_terrain_geometry.positions[initial_terrain_size * initial_terrain_size - 1].z) /
-                               4.0f;
+    TerrainScene terrain_scene = setupTerrainScene(vk_device, vk_queue, selected_queue_family_index, initial_terrain_params);
+    generateTerrainGeometryWithLoadingScreen(vk_device, terrain_scene.chunkManager, activeCamera->getPosition());
 
     WaterScene water_scene = setupWaterScene(vk_device, initial_terrain_params);
-
-    ChunkManager chunk_manager;
-    chunk_manager.baseParams.gridSizeExponent = 4; // size=17 (16x16 cells), small/fast per chunk
-    chunk_manager.baseParams.hurst = initial_terrain_params.hurst;
-    chunk_manager.baseParams.seed = initial_terrain_params.seed;
-    chunk_manager.baseParams.initialVariance = initial_terrain_params.initialVariance;
-    chunk_manager.viewRadius = g_chunk_view_radius; // subsequent changes applied on slider release, below
-
-    /* --------------------------------------------- */
-    // Camera
-    /* --------------------------------------------- */
-
-    // Create a camera helper object, positioned/oriented per camera_terrain.ini. The trackball
-    // camera's target is derived by raycasting the configured position/direction against the
-    // terrain (same conversion used for live trackball<->fly switching further below), falling
-    // back to the origin if that ray doesn't hit the terrain (e.g. looking up).
-    FlyCamera flyCamera(field_of_view, aspect_ratio, near_plane_distance, far_plane_distance);
-    flyCamera.translate(camera_position);
-    flyCamera.rotate(glm::radians(camera_yaw), glm::radians(camera_pitch));
-    auto initial_hit = raycastTerrain(terrain_scene, flyCamera.getPosition(), flyCamera.getForward());
-    TrackballCamera trackballCamera(flyCamera, initial_hit.has_value() ? initial_hit->point : glm::vec3(0.0f, 0.0f, 0.0f));
-    Camera* activeCamera = &trackballCamera;
 
     // Callback function for handling mouse button events:
     glfwSetMouseButtonCallback(window, mouseButtonCallbackFromGlfw);
@@ -1012,7 +985,7 @@ int main(int argc, char** argv) {
                 glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
             } else {
                 // Trackball camera
-                auto hit = raycastTerrain(terrain_scene, flyCamera.getPosition(), flyCamera.getForward());
+                auto hit = raycastTerrain(flyCamera.getPosition(), flyCamera.getForward());
                 if (hit.has_value()) {
                     trackballCamera = TrackballCamera(flyCamera, hit->point);
                     activeCamera = &trackballCamera;
@@ -1027,24 +1000,21 @@ int main(int argc, char** argv) {
 
         if (g_reseed_requested) {
             g_reseed_requested = false;
-            if (!terrain_scene.pendingTerrainGeneration.valid()) {
-                terrain_scene.terrainParams.seed = generateRandomSeed();
-                terrain_scene.pendingTerrainGeneration = startTerrainGeneration(terrain_scene.terrainParams);
-            }
+            terrain_scene.chunkManager.baseParams.seed = generateRandomSeed();
         }
 
         if (g_chunk_view_radius_changed) {
             g_chunk_view_radius_changed = false;
-            chunk_manager.viewRadius = g_chunk_view_radius;
+            terrain_scene.chunkManager.viewRadius = g_chunk_view_radius;
         }
-        updateLoadedChunks(chunk_manager, activeCamera->getPosition());
+        updateLoadedChunks(vk_device, terrain_scene.chunkManager, activeCamera->getPosition());
         {
             static size_t last_loaded = SIZE_MAX;
             static size_t last_pending = SIZE_MAX;
-            if (chunk_manager.loadedChunks.size() != last_loaded || chunk_manager.pendingChunks.size() != last_pending) {
-                last_loaded = chunk_manager.loadedChunks.size();
-                last_pending = chunk_manager.pendingChunks.size();
-                ChunkCoord cc = cameraToChunkCoord(activeCamera->getPosition(), chunk_manager.baseParams);
+            if (terrain_scene.chunkManager.loadedChunks.size() != last_loaded || terrain_scene.chunkManager.pendingChunks.size() != last_pending) {
+                last_loaded = terrain_scene.chunkManager.loadedChunks.size();
+                last_pending = terrain_scene.chunkManager.pendingChunks.size();
+                ChunkCoord cc = cameraToChunkCoord(activeCamera->getPosition(), terrain_scene.chunkManager.baseParams);
                 glm::vec3 camPos = activeCamera->getPosition();
                 fprintf(
                     stderr,
@@ -1192,7 +1162,6 @@ int main(int argc, char** argv) {
     vklDestroyDeviceLocalImageAndItsBackingMemory(depth_buffer);
     cleanupTerrainScene(vk_device, terrain_scene);
     cleanupWaterScene(vk_device, water_scene);
-    cleanupChunkManager(chunk_manager);
 
     /* --------------------------------------------- */
     // Dear ImGui: shutdown
@@ -1749,16 +1718,11 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
     return vklCreateGraphicsPipeline(pipeline_config);
 }
 
-TerrainScene setupTerrainScene(
-    VkDevice vk_device,
-    VkQueue vk_queue,
-    uint32_t selected_queue_family_index,
-    const GeometryData& terrain_geometry_data,
-    TerrainParams& params
-) {
+TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, TerrainParams& params) {
     TerrainScene scene{};
-    scene.terrainParams = params;
     scene.heightScale = 1.0f;
+    scene.chunkManager.baseParams = params;
+    scene.chunkManager.viewRadius = g_chunk_view_radius;
 
     /* --------------------------------------------- */
     // Create a Custom Graphics Pipeline
@@ -1807,7 +1771,6 @@ TerrainScene setupTerrainScene(
     DirectionalLight directional_light = {DIRLIGHT_COLOR, glm::normalize(DIRLIGHT_DIR)};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_dirlight, &directional_light, sizeof(DirectionalLight));
 
-    scene.terrain_geometry_to = createAndUploadIntoGpuMemory(terrain_geometry_data);
     scene.ub_terrain_vert = vklCreateHostCoherentBufferWithBackingMemory(
         sizeof(UniformBufferVert),
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
@@ -1823,34 +1786,16 @@ TerrainScene setupTerrainScene(
 }
 
 void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera* camera) {
-    if (scene.pendingTerrainGeneration.valid() &&
-        scene.pendingTerrainGeneration.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-        scene.blendStartTime = glfwGetTime();
-        GeometryData new_terrain_geometry_data = scene.pendingTerrainGeneration.get();
-        vkDeviceWaitIdle(vk_device);
-
-        int size = (1 << scene.terrainParams.gridSizeExponent) + 1;
-        scene.waterLevel = (new_terrain_geometry_data.positions[0].z + new_terrain_geometry_data.positions[size - 1].z +
-                            new_terrain_geometry_data.positions[(size - 1) * size].z + new_terrain_geometry_data.positions[size * size - 1].z) /
-                           4.0f;
-
-        if (scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE) {
-            destroyGeometryGpuMemory(scene.terrain_geometry_from);
-        }
-        scene.terrain_geometry_from = scene.terrain_geometry_to;
-        scene.terrain_geometry_to = createAndUploadIntoGpuMemory(new_terrain_geometry_data);
-    }
-
+    // Shared, scene-level uniforms: identical for every chunk, since chunk position is already
+    // baked into each chunk's own vertex data (no per-chunk model matrix needed) and chunks don't
+    // blend yet (isBlending is always false here; see PLAN.md §10 Step 11 for the planned per-chunk
+    // blend, which will need this to become per-chunk instead).
     UniformBufferVert ub_vert_data;
     ub_vert_data.modelMatrix = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, scene.heightScale));
     ub_vert_data.modelMatrixForNormals = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, 1 / scene.heightScale));
     ub_vert_data.viewProjMatrix = camera->getViewProjectionMatrix();
-    ub_vert_data.blendFactor = glm::clamp((static_cast<float>(glfwGetTime()) - scene.blendStartTime) / scene.blendDuration, 0.0f, 1.0f);
-    if (scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE && ub_vert_data.blendFactor >= 1.0f) {
-        destroyGeometryGpuMemory(scene.terrain_geometry_from);
-        scene.terrain_geometry_from = Geometry{};
-    }
-    ub_vert_data.isBlending = scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE;
+    ub_vert_data.blendFactor = 1.0f;
+    ub_vert_data.isBlending = 0;
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_vert, &ub_vert_data, sizeof(UniformBufferVert));
 
     UniformBufferFrag ub_frag_data;
@@ -1864,13 +1809,14 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
     if (selected_pipeline == VK_NULL_HANDLE) {
         selected_pipeline = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
     }
-    bool has_from = scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE;
-    drawGeometryWithMaterial(
-        selected_pipeline,
-        has_from ? scene.terrain_geometry_from : scene.terrain_geometry_to,
-        scene.terrain_geometry_to,
-        scene.ds_terrain
-    );
+
+    // One draw call per loaded chunk, all against the same pipeline/descriptor set above — only
+    // the vertex/index buffers differ per chunk. No blending yet, so the same Geometry is passed
+    // as both "from" and "to".
+    for (auto& entry : scene.chunkManager.loadedChunks) {
+        const Geometry& chunk_geometry = entry.second;
+        drawGeometryWithMaterial(selected_pipeline, chunk_geometry, chunk_geometry, scene.ds_terrain);
+    }
 }
 
 void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
@@ -1878,10 +1824,6 @@ void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
     vkDestroyDescriptorPool(vk_device, scene.descriptor_pool, nullptr);
     vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain_vert);
     vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain_frag);
-    if (scene.terrain_geometry_from.positionsBuffer != VK_NULL_HANDLE) {
-        destroyGeometryGpuMemory(scene.terrain_geometry_from);
-    }
-    destroyGeometryGpuMemory(scene.terrain_geometry_to);
     vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_dirlight);
 
     for (size_t i = 0; i < POLYMODES; ++i) {
@@ -1889,13 +1831,14 @@ void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
             vklDestroyGraphicsPipeline(scene.pipelines[i][j]);
         }
     }
+    cleanupChunkManager(scene.chunkManager);
 }
 
 WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_params) {
     WaterScene scene{};
 
     int size = (1 << terrain_params.gridSizeExponent) + 1;
-    float half_extent = (size / 2.0f) * terrain_params.spacing;
+    float half_extent = ((size - 1) / 2.0f) * terrain_params.spacing; // (size-1) cells rendered, not size vertices
     std::vector<glm::vec3> positions = {
         {-half_extent, -half_extent, 0.0f},
         {half_extent, -half_extent, 0.0f},
@@ -2006,7 +1949,11 @@ void cleanupWaterScene(VkDevice vk_device, WaterScene& scene) {
     vklDestroyGraphicsPipeline(scene.pipeline);
 }
 
-void buildLoadingGUI() {
+std::future<GeometryData> startTerrainGeneration(const TerrainParams& params) {
+    return std::async(std::launch::async, generateTerrainGeometry, params);
+}
+
+void buildLoadingGUI(size_t pendingChunkCount) {
     const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(main_viewport->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::Begin(
@@ -2014,24 +1961,23 @@ void buildLoadingGUI() {
         nullptr,
         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove
     );
-    ImGui::Text("Generating terrain...");
+    ImGui::Text("Generating terrain... (%zu chunks remaining)", pendingChunkCount);
     ImGui::End();
 }
 
-std::future<GeometryData> startTerrainGeneration(const TerrainParams& params) {
-    return std::async(std::launch::async, generateTerrainGeometry, params);
+static size_t chunksStillGenerating(const ChunkManager& chunkManager) {
+    return chunkManager.pendingChunks.size() + chunkManager.readyForNormals.size() + chunkManager.pendingNormals.size();
 }
 
-GeometryData generateTerrainGeometryWithLoadingScreen(const TerrainParams& params) {
-    std::future<GeometryData> terrain_geometry_future = startTerrainGeneration(params);
-
-    while (terrain_geometry_future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& chunkManager, const glm::vec3& cameraPos) {
+    updateLoadedChunks(vk_device, chunkManager, cameraPos);
+    while (chunksStillGenerating(chunkManager) > 0) {
         glfwPollEvents();
 
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        buildLoadingGUI();
+        buildLoadingGUI(chunksStillGenerating(chunkManager));
         ImGui::Render();
 
         vklWaitForNextSwapchainImage();
@@ -2039,9 +1985,9 @@ GeometryData generateTerrainGeometryWithLoadingScreen(const TerrainParams& param
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
         vklEndRecordingCommands();
         vklPresentCurrentSwapchainImage();
-    }
 
-    return terrain_geometry_future.get();
+        updateLoadedChunks(vk_device, chunkManager, cameraPos);
+    }
 }
 
 uint32_t generateRandomSeed() {
@@ -2069,21 +2015,21 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
         return;
     }
 
-    bool generation_in_progress = scene.pendingTerrainGeneration.valid();
-    const char* generation_status_text = generation_in_progress ? "Generating" : "Generated";
+    size_t generating_count = chunksStillGenerating(scene.chunkManager);
+    bool generation_in_progress = generating_count > 0;
+    std::string generation_status_string =
+        generation_in_progress ? "Generating (" + std::to_string(generating_count) + " chunks)" : "Generated";
+    const char* generation_status_text = generation_status_string.c_str();
     float generation_status_offset = (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(generation_status_text).x) * 0.5f;
     if (generation_status_offset > 0.0f) {
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + generation_status_offset);
     }
     ImGui::Text("%s", generation_status_text);
 
+    // Hurst/seed only affect chunks generated from this point on — retroactively regenerating
+    // already-loaded chunks is PLAN.md §10 Step 11, not yet implemented.
     labelThenRightAlignedWidget("Hurst Exponent", kSliderWidth);
-    ImGui::BeginDisabled(generation_in_progress);
-    ImGui::SliderFloat("##hurst", &scene.terrainParams.hurst, 0.0f, 1.0f, "%f", flags_for_sliders);
-    if (ImGui::IsItemDeactivatedAfterEdit()) {
-        scene.pendingTerrainGeneration = startTerrainGeneration(scene.terrainParams);
-    }
-    ImGui::EndDisabled();
+    ImGui::SliderFloat("##hurst", &scene.chunkManager.baseParams.hurst, 0.0f, 1.0f, "%f", flags_for_sliders);
 
     labelThenRightAlignedWidget("Height Scale", kSliderWidth);
     ImGui::SliderFloat("##heightScale", &scene.heightScale, 0.000001f, 5.0f, "%f", flags_for_sliders);
@@ -2100,15 +2046,12 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
         g_chunk_view_radius_changed = true;
     }
 
-    std::string seed_label = "Current seed: " + std::to_string(scene.terrainParams.seed);
+    std::string seed_label = "Current seed: " + std::to_string(scene.chunkManager.baseParams.seed);
     float reseed_button_width = ImGui::CalcTextSize("Reseed").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     labelThenRightAlignedWidget(seed_label.c_str(), reseed_button_width);
-    ImGui::BeginDisabled(generation_in_progress);
     if (ImGui::Button("Reseed")) {
-        scene.terrainParams.seed = generateRandomSeed();
-        scene.pendingTerrainGeneration = startTerrainGeneration(scene.terrainParams);
+        scene.chunkManager.baseParams.seed = generateRandomSeed();
     }
-    ImGui::EndDisabled();
 
     ImGui::Text("Camera Mode: %s", g_toggle_camera ? "Fly" : "Trackball");
     ImGui::Text("Camera Position: (%.2f, %.2f, %.2f)", cameraPosition.x, cameraPosition.y, cameraPosition.z);
@@ -2142,7 +2085,7 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     ImGui::End();
 }
 
-std::optional<Hit> raycastTerrain(const TerrainScene& terrainScene, const glm::vec3& origin, const glm::vec3& direction) {
+std::optional<Hit> raycastTerrain(const glm::vec3& origin, const glm::vec3& direction) {
     constexpr float kGroundPlaneZ = 0.0f;
     if (std::abs(direction.z) < 1e-6f) return std::nullopt;
     float t = (kGroundPlaneZ - origin.z) / direction.z;
