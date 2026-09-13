@@ -10,6 +10,8 @@ struct TerrainParams {
     float initialVariance = 25.0f;
     // only needed for non-square maps, kept just in case
     int spacing = 1;
+    int chunkX = 0;
+    int chunkY = 0;
 };
 
 class DiamondSquareGenerator {
@@ -24,10 +26,12 @@ class DiamondSquareGenerator {
    public:
     DiamondSquareGenerator(const TerrainParams& newParams = TerrainParams());
     void SetParams(const TerrainParams& newParams);
-    const TerrainParams& GetParams() const { return params; };
-    const std::vector<uint32_t>& getIndices() const { return indices; };
-    const std::vector<glm::vec3>& getNormals() const { return normals; };
-    const std::vector<glm::vec3>& getPositions() const { return positions; };
+    const TerrainParams& GetParams() const;
+    const std::vector<uint32_t>& getIndices() const;
+    const std::vector<glm::vec3>& getNormals() const;
+    const std::vector<glm::vec3>& getPositions() const;
+    const int getWorldGridX(int x) const;
+    const int getWorldGridY(int y) const;
     void GenerateIndices();
     void GenerateHeightMap();
     void GeneratePositions();
