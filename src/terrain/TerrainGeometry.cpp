@@ -6,7 +6,7 @@
  * Vulkan edition created by Johannes Unterguggenberger (junt@cg.tuwien.ac.at).
  */
 
-#include "Geometry.h"
+#include "TerrainGeometry.h"
 
 #include <glm/gtc/constants.hpp>
 

@@ -89,8 +89,10 @@ add_executable(${PROJECT_NAME}
     src/utils/Utils.h
     src/utils/MathUtils.h
     src/Camera/Camera.cpp
-    src/terrain/Geometry.h
-    src/terrain/Geometry.cpp
+    src/terrain/TerrainGeometry.h
+    src/terrain/TerrainGeometry.cpp
+    src/terrain/WaterGeometry.h
+    src/terrain/WaterGeometry.cpp
     src/terrain/DiamondSquareGenerator.h
     src/terrain/DiamondSquareGenerator.cpp
     src/terrain/ChunkCoord.h

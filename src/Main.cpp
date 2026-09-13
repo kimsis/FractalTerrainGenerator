@@ -24,7 +24,8 @@
 #include "imgui_impl_vulkan.h"
 #include "terrain/ChunkManager.h"
 #include "terrain/DiamondSquareGenerator.h"
-#include "terrain/Geometry.h"
+#include "terrain/TerrainGeometry.h"
+#include "terrain/WaterGeometry.h"
 #include "utils/PathUtils.h"
 #include "utils/Utils.h"
 
@@ -264,8 +265,11 @@ struct Hit {
 };
 
 /*!
- *	Holds every GPU resource that makes up the water plane: a single flat quad, built once at
- *	startup and never regenerated, since its footprint (the terrain's fixed XY extent) never changes.
+ *	Holds every GPU resource that makes up the water plane: one pipeline/descriptor set/uniform
+ *	buffer shared by all chunks (updated once per frame, just like terrain's ub_terrain_vert), and
+ *	one small baked quad per currently-loaded terrain chunk — created when a chunk loads and
+ *	destroyed when it's evicted, mirroring ChunkManager::loadedChunks' own lifecycle (see
+ *	updateWaterChunks).
  */
 struct WaterScene {
     VkDescriptorSetLayout descriptor_set_layout;
@@ -274,12 +278,10 @@ struct WaterScene {
     std::string vertexShaderPath;
     std::string fragmentShaderPath;
 
-    VkBuffer positionsBuffer;
-    VkBuffer indicesBuffer;
-    uint32_t numberOfIndices;
-
     VkBuffer ub_water_vert;
     VkDescriptorSet ds_water;
+
+    std::unordered_map<ChunkCoord, WaterChunkGeometry> chunkGeometry;
 };
 
 /*!
@@ -452,15 +454,26 @@ void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene);
 std::optional<Hit> raycastTerrain(const glm::vec3& origin, const glm::vec3& direction);
 
 /*!
- *	Builds the water plane's single quad (spanning the terrain's fixed XY footprint at local z=0),
- *	pipeline, uniform buffer, and descriptor set.
+ *	Builds the water plane's shared pipeline, uniform buffer, and descriptor set.
  */
 WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_params);
 
 /*!
- *	Updates the water plane's uniform buffer (model matrix built from the terrain scene's current
- *	waterLevel/heightScale) and records its draw call. Must be called between
- *	vklStartRecordingCommands() and vklEndRecordingCommands(), after the terrain has been drawn.
+ *	Creates a small world-space-baked water quad for any newly-loaded terrain chunk, and destroys
+ *	it for any chunk that's since been evicted — call once per frame, right after
+ *	updateLoadedChunks(), so this always reflects that same frame's loadedChunks set. Must be called
+ *	*outside* vklStartRecordingCommands()/vklEndRecordingCommands(), since destroying an evicted
+ *	chunk's geometry needs a vkDeviceWaitIdle guard first (a previous frame's command buffer might
+ *	still be referencing it — same concern as ChunkManager's own chunk eviction).
+ */
+void updateWaterChunks(VkDevice vk_device, WaterScene& scene, const ChunkManager& chunkManager);
+
+/*!
+ *	Updates the water plane's shared uniform buffer once (model matrix translating by the terrain
+ *	scene's current waterLevel/heightScale — identical for every chunk, since XY is already baked
+ *	into each chunk's own vertex data) and records one draw call per loaded chunk's water geometry.
+ *	Must be called between vklStartRecordingCommands() and vklEndRecordingCommands(), after the
+ *	terrain has been drawn.
  */
 void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scene, const Camera* camera);
 
@@ -1008,6 +1021,7 @@ int main(int argc, char** argv) {
             terrain_scene.chunkManager.viewRadius = g_chunk_view_radius;
         }
         updateLoadedChunks(vk_device, terrain_scene.chunkManager, activeCamera->getPosition());
+        updateWaterChunks(vk_device, water_scene, terrain_scene.chunkManager);
         {
             static size_t last_loaded = SIZE_MAX;
             static size_t last_pending = SIZE_MAX;
@@ -1837,28 +1851,6 @@ void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
 WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_params) {
     WaterScene scene{};
 
-    int size = (1 << terrain_params.gridSizeExponent) + 1;
-    float half_extent = ((size - 1) / 2.0f) * terrain_params.spacing; // (size-1) cells rendered, not size vertices
-    std::vector<glm::vec3> positions = {
-        {-half_extent, -half_extent, 0.0f},
-        {half_extent, -half_extent, 0.0f},
-        {half_extent, half_extent, 0.0f},
-        {-half_extent, half_extent, 0.0f},
-    };
-    std::vector<uint32_t> indices = {0u, 1u, 2u, 0u, 2u, 3u};
-
-    scene.positionsBuffer = vklCreateHostCoherentBufferAndUploadData(
-        positions.data(),
-        positions.size() * sizeof(glm::vec3),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-    );
-    scene.indicesBuffer = vklCreateHostCoherentBufferAndUploadData(
-        indices.data(),
-        indices.size() * sizeof(uint32_t),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT
-    );
-    scene.numberOfIndices = static_cast<uint32_t>(indices.size());
-
     scene.vertexShaderPath = gcgFindShaderFile("assets/shaders/water.vert");
     scene.fragmentShaderPath = gcgFindShaderFile("assets/shaders/water.frag");
 
@@ -1918,7 +1910,36 @@ WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_para
     };
     vkUpdateDescriptorSets(vk_device, 1u, &write, 0u, nullptr);
 
+    // Per-chunk geometry (chunkGeometry) is created lazily in updateWaterChunks() as chunks load,
+    // not here — there's nothing loaded yet at setup time.
     return scene;
+}
+
+void updateWaterChunks(VkDevice vk_device, WaterScene& scene, const ChunkManager& chunkManager) {
+    // Create a water quad for any newly-loaded terrain chunk. Each is an independent buffer, so —
+    // just like loading a new terrain chunk — no synchronization is needed here.
+    for (auto& entry : chunkManager.loadedChunks) {
+        const ChunkCoord& coord = entry.first;
+        if (scene.chunkGeometry.count(coord)) continue;
+        scene.chunkGeometry[coord] = buildWaterChunkGeometry(coord, chunkManager.baseParams);
+    }
+
+    // Destroy the water quad for any chunk that's no longer loaded (evicted). Wait for the GPU to
+    // finish first — a previous frame's command buffer may still be referencing these buffers (same
+    // concern as ChunkManager::updateLoadedChunks evicting terrain geometry).
+    bool evicted_any = false;
+    for (auto it = scene.chunkGeometry.begin(); it != scene.chunkGeometry.end();) {
+        if (!chunkManager.loadedChunks.count(it->first)) {
+            if (!evicted_any) {
+                vkDeviceWaitIdle(vk_device);
+                evicted_any = true;
+            }
+            destroyWaterChunkGeometry(it->second);
+            it = scene.chunkGeometry.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scene, const Camera* camera) {
@@ -1930,22 +1951,27 @@ void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scen
     VkCommandBuffer cb = vklGetCurrentCommandBuffer();
     VkPipelineLayout pipeline_layout = vklGetLayoutForPipeline(scene.pipeline);
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u, &scene.ds_water, 0u, nullptr);
-
     vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, scene.pipeline);
-    VkBuffer vertex_buffers[1] = {scene.positionsBuffer};
-    VkDeviceSize offsets[1] = {0};
-    vkCmdBindVertexBuffers(cb, 0u, 1u, vertex_buffers, offsets);
 
-    vkCmdBindIndexBuffer(cb, scene.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cb, scene.numberOfIndices, 1u, 0u, 0u, 0u);
+    // One draw call per loaded chunk's water tile, all against the same pipeline/descriptor set
+    // above — only the vertex/index buffers differ per chunk, just like terrain's own chunk loop.
+    for (auto& entry : scene.chunkGeometry) {
+        const WaterChunkGeometry& geometry = entry.second;
+        VkBuffer vertex_buffers[1] = {geometry.positionsBuffer};
+        VkDeviceSize offsets[1] = {0};
+        vkCmdBindVertexBuffers(cb, 0u, 1u, vertex_buffers, offsets);
+        vkCmdBindIndexBuffer(cb, geometry.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cb, geometry.numberOfIndices, 1u, 0u, 0u, 0u);
+    }
 }
 
 void cleanupWaterScene(VkDevice vk_device, WaterScene& scene) {
+    for (auto& entry : scene.chunkGeometry) {
+        destroyWaterChunkGeometry(entry.second);
+    }
     vkDestroyDescriptorSetLayout(vk_device, scene.descriptor_set_layout, nullptr);
     vkDestroyDescriptorPool(vk_device, scene.descriptor_pool, nullptr);
     vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_water_vert);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.positionsBuffer);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.indicesBuffer);
     vklDestroyGraphicsPipeline(scene.pipeline);
 }
 

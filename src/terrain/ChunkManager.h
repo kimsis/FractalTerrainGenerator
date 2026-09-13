@@ -7,7 +7,7 @@
 
 #include "ChunkCoord.h"
 #include "DiamondSquareGenerator.h"
-#include "Geometry.h"
+#include "TerrainGeometry.h"
 
 /*!
  *	Owns the set of terrain chunks currently loaded around the camera, generating new ones on
