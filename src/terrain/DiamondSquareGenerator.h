@@ -3,6 +3,8 @@
 #include <glm/glm.hpp>
 #include <vector>
 
+#include "ChunkCoord.h"
+
 struct TerrainParams {
     int gridSizeExponent = 11; // gridSize = 2^gridSizeExponent + 1
     float hurst = 0.8f;
@@ -13,6 +15,13 @@ struct TerrainParams {
     int chunkX = 0;
     int chunkY = 0;
 };
+
+/*!
+ *	Inverse of getWorldGridX/getWorldGridY: given a world-space position, returns which chunk
+ *	(under the given grid size/spacing) that position falls in. Ignores pos.z (chunks are laid
+ *	out in the XY plane).
+ */
+ChunkCoord cameraToChunkCoord(const glm::vec3& pos, const TerrainParams& params);
 
 class DiamondSquareGenerator {
    private:

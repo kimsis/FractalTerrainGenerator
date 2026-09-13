@@ -23,6 +23,15 @@ const std::vector<glm::vec3>& DiamondSquareGenerator::getPositions() const { ret
 const int DiamondSquareGenerator::getWorldGridX(int x) const { return params.chunkX * (size - 1) + x; };
 const int DiamondSquareGenerator::getWorldGridY(int y) const { return params.chunkY * (size - 1) + y; };
 
+ChunkCoord cameraToChunkCoord(const glm::vec3& pos, const TerrainParams& params) {
+    int size = (1 << params.gridSizeExponent) + 1;
+    float globalGridX = pos.x / params.spacing + size / 2.0f;
+    float globalGridY = pos.y / params.spacing + size / 2.0f;
+    int cx = static_cast<int>(std::floor(globalGridX / (size - 1)));
+    int cy = static_cast<int>(std::floor(globalGridY / (size - 1)));
+    return ChunkCoord{cx, cy};
+}
+
 void DiamondSquareGenerator::GenerateIndices() {
     indices.assign((size - 1) * (size - 1) * 6, 0u);
     int counter = 0;
@@ -74,19 +83,19 @@ void DiamondSquareGenerator::GenerateHeightMap() {
             for (int y = kStart; y < size; y += step) {
                 float sum = 0.0f;
                 int count = 0;
-                if (x - halfStep >= 0) {
+                if (x - halfStep >= 0 && x != 0 && x != size - 1) {
                     sum += at(heights, size, x - halfStep, y);
                     ++count;
                 }
-                if (x + halfStep < size) {
+                if (x + halfStep < size && x != 0 && x != size - 1) {
                     sum += at(heights, size, x + halfStep, y);
                     ++count;
                 }
-                if (y - halfStep >= 0) {
+                if (y - halfStep >= 0 && y != 0 && y != size - 1) {
                     sum += at(heights, size, x, y - halfStep);
                     ++count;
                 }
-                if (y + halfStep < size) {
+                if (y + halfStep < size && y != 0 && y != size - 1) {
                     sum += at(heights, size, x, y + halfStep);
                     ++count;
                 }

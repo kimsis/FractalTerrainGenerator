@@ -1,5 +1,8 @@
+#pragma once
+
 #include <cmath>
 #include <glm/glm.hpp>
+#include <vector>
 
 inline uint32_t packUint16Pair(int high, int low) { return (static_cast<uint32_t>(high) << 16) | (static_cast<uint32_t>(low) & 0xFFFFu); }
 
