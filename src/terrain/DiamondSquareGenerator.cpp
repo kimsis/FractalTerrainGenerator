@@ -33,7 +33,7 @@ ChunkCoord cameraToChunkCoord(const glm::vec3& pos, const TerrainParams& params)
 }
 
 void DiamondSquareGenerator::GenerateIndices() {
-    indices.assign((size - 1) * (size - 1) * 6, 0u);
+    indices.resize((size - 1) * (size - 1) * 6);
     int counter = 0;
     for (int x = 0; x < size - 1; x++) {
         for (int y = 0; y < size - 1; y++) {
@@ -54,6 +54,7 @@ void DiamondSquareGenerator::GenerateIndices() {
 }
 
 void DiamondSquareGenerator::GenerateHeightMap() {
+    heights.resize(size * size);
     int step = size - 1;
     // Init corner values, a.k.a. square step 0
     float variance = varianceAt(0, params.hurst, params.initialVariance);
@@ -109,6 +110,7 @@ void DiamondSquareGenerator::GenerateHeightMap() {
 }
 
 void DiamondSquareGenerator::GeneratePositions() {
+    positions.resize(size * size);
     if (heights.empty()) GenerateHeightMap();
     for (int x = 0; x < size; x++) {
         for (int y = 0; y < size; y++) {
@@ -121,6 +123,7 @@ void DiamondSquareGenerator::GeneratePositions() {
 }
 
 void DiamondSquareGenerator::DerriveNormals() {
+    normals.resize(size * size);
     if (heights.empty()) GenerateHeightMap();
     for (int x = 0; x < size; x++) {
         for (int y = 0; y < size; y++) {
@@ -155,9 +158,6 @@ void DiamondSquareGenerator::DerriveNormals() {
 
 void DiamondSquareGenerator::ComputeTerrain() {
     size = (1 << params.gridSizeExponent) + 1;
-    heights.resize(size * size);
-    normals.resize(size * size);
-    positions.resize(size * size);
     GenerateHeightMap();
     GeneratePositions();
     DerriveNormals();
