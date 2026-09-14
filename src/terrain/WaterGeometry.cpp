@@ -1,11 +1,14 @@
 #include "WaterGeometry.h"
 
-#include <vector>
 #include <VulkanLaunchpad.h>
+
+#include <cstdint>
+#include <glm/glm.hpp>
+#include <vector>
 
 WaterChunkGeometry buildWaterChunkGeometry(const ChunkCoord& coord, const TerrainParams& baseParams) {
     int size = (1 << baseParams.gridSizeExponent) + 1;
-    float half_extent = ((size - 1) / 2.0f) * baseParams.spacing;  // (size-1) cells rendered, not size vertices
+    float half_extent = ((size - 1) / 2.0f) * baseParams.spacing; // (size-1) cells rendered, not size vertices
     float centerX = coord.cx * (size - 1) * static_cast<float>(baseParams.spacing);
     float centerY = coord.cy * (size - 1) * static_cast<float>(baseParams.spacing);
 

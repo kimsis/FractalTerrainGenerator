@@ -5,16 +5,22 @@
  * Original version created by Lukas Gersthofer and Bernhard Steiner.
  * Vulkan edition created by Johannes Unterguggenberger (junt@cg.tuwien.ac.at).
  */
+#include <GLFW/glfw3.h>
+#include <VulkanLaunchpad.h>
 #include <vulkan/vulkan.h>
 
 #include <algorithm>
 #include <array>
-#include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <future>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <optional>
 #include <random>
-#include <sstream>
+#include <string>
+#include <unordered_map>
 #include <vector>
 #include <vulkan/vulkan.hpp> // for vk::OutOfDateKHRError, thrown by the framework's internal vulkan-hpp calls on resize
 
@@ -22,6 +28,7 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
+#include "terrain/ChunkCoord.h"
 #include "terrain/ChunkManager.h"
 #include "terrain/DiamondSquareGenerator.h"
 #include "terrain/TerrainGeometry.h"

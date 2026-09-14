@@ -2,6 +2,8 @@
 
 #include <VulkanLaunchpad.h>
 
+#include <glm/gtc/matrix_transform.hpp>
+
 // ----- Camera -----
 
 Camera::Camera(float fov, float ar, float near_plane_dist, float far_plane_dist) {

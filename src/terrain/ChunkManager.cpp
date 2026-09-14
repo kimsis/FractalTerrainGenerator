@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <optional>
+#include <utility>
 
 std::future<GeometryData> startTerrainGeneration(const TerrainParams& params);
 
@@ -25,9 +26,7 @@ static std::vector<float> sampleRow(const GeometryData& data, int size, int loca
 
 // True if `geometry`'s buffers are real, not the all-VK_NULL_HANDLE state a LoadedChunk's `from`
 // sits in whenever that chunk isn't currently blending.
-static bool isValidGeometry(const Geometry& geometry) {
-    return geometry.vertexBuffer != VK_NULL_HANDLE;
-}
+static bool isValidGeometry(const Geometry& geometry) { return geometry.vertexBuffer != VK_NULL_HANDLE; }
 
 // A chunk's index buffer is created once, on its first upload, and then shared for the chunk's
 // entire lifetime across every later Hurst/reseed regeneration (see step 4) — `to.indicesBuffer`
@@ -68,20 +67,17 @@ static std::future<std::vector<glm::vec3>> dispatchNormalDerivation(const ChunkM
 
     std::vector<glm::vec3> positions = manager.chunkData.at(coord).positions;
     int spacing = manager.baseParams.spacing;
-    return std::async(
-        std::launch::async,
-        [positions = std::move(positions), size, spacing, leftSkirt, rightSkirt, topSkirt, bottomSkirt]() {
-            return deriveTerrainNormals(
-                positions,
-                size,
-                spacing,
-                leftSkirt ? &*leftSkirt : nullptr,
-                rightSkirt ? &*rightSkirt : nullptr,
-                topSkirt ? &*topSkirt : nullptr,
-                bottomSkirt ? &*bottomSkirt : nullptr
-            );
-        }
-    );
+    return std::async(std::launch::async, [positions = std::move(positions), size, spacing, leftSkirt, rightSkirt, topSkirt, bottomSkirt]() {
+        return deriveTerrainNormals(
+            positions,
+            size,
+            spacing,
+            leftSkirt ? &*leftSkirt : nullptr,
+            rightSkirt ? &*rightSkirt : nullptr,
+            topSkirt ? &*topSkirt : nullptr,
+            bottomSkirt ? &*bottomSkirt : nullptr
+        );
+    });
 }
 
 // How many updateLoadedChunks calls a PendingDestroy waits before it's actually freed. One call
@@ -124,7 +120,7 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
     // 3. Dispatch phase-2 (normal derivation) for any chunk whose own phase 1 is done and whose every
     // still-relevant neighbor has also finished phase 1. A neighbor outside the view radius will never
     // exist, so it's left as nullptr and deriveTerrainNormals() extrapolates that edge instead.
-    static const ChunkCoord kOffsets[4] = {{-1, 0}, {1, 0}, {0, 1}, {0, -1}};  // left, right, top, bottom
+    static const ChunkCoord kOffsets[4] = {{-1, 0}, {1, 0}, {0, 1}, {0, -1}}; // left, right, top, bottom
     for (auto it = manager.readyForNormals.begin(); it != manager.readyForNormals.end();) {
         ChunkCoord coord = *it;
 
@@ -207,7 +203,7 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
         if (manager.pendingRenormals.count(coord)) continue;
 
         uint8_t stillMissing = missingNeighborMaskFor(manager, coord);
-        if ((chunk.missingNeighborMask & ~stillMissing) == 0) continue;  // nothing newly available yet
+        if ((chunk.missingNeighborMask & ~stillMissing) == 0) continue; // nothing newly available yet
 
         manager.pendingRenormals[coord] = dispatchNormalDerivation(manager, coord, size);
     }

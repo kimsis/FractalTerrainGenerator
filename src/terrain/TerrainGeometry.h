@@ -9,6 +9,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include <cstdint>
 #include <glm/glm.hpp>
 #include <vector>
 

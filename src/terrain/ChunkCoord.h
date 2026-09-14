@@ -1,9 +1,6 @@
 #pragma once
 
-#include <cstdint>
 #include <functional>
-
-#include "../utils/MathUtils.h"
 
 struct ChunkCoord {
     int cx, cy;

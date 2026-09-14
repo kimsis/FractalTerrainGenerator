@@ -8,7 +8,6 @@
 
 #include "TerrainGeometry.h"
 
-#include <glm/gtc/constants.hpp>
 #include <VulkanLaunchpad.h>
 
 #include "DiamondSquareGenerator.h"
@@ -20,9 +19,7 @@
 // offsets, unlike e.g. uniform/storage buffers).
 static constexpr VkDeviceSize kVertexSubBufferAlignment = 16;
 
-static VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) {
-    return (value + alignment - 1) / alignment * alignment;
-}
+static VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) { return (value + alignment - 1) / alignment * alignment; }
 
 // Phase 1 of terrain generation: heights + positions + indices only, no normals. This is the part
 // that's fully independent between chunks — a pure function of (seed, global coords, level) — so
@@ -58,10 +55,8 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data, bool up
     VkDeviceSize normals_offset = alignUp(static_cast<VkDeviceSize>(positions_buffer_byte_size), kVertexSubBufferAlignment);
     VkDeviceSize vertex_buffer_byte_size = normals_offset + static_cast<VkDeviceSize>(normals_buffer_byte_size);
 
-    result.vertexBuffer = vklCreateHostCoherentBufferWithBackingMemory(
-        vertex_buffer_byte_size,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-    );
+    result.vertexBuffer =
+        vklCreateHostCoherentBufferWithBackingMemory(vertex_buffer_byte_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
     vklCopyDataIntoHostCoherentBuffer(result.vertexBuffer, 0, geometry_data.positions.data(), positions_buffer_byte_size);
     vklCopyDataIntoHostCoherentBuffer(result.vertexBuffer, normals_offset, geometry_data.normals.data(), normals_buffer_byte_size);
     result.normalsOffset = normals_offset;

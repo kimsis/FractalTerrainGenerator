@@ -1,6 +1,6 @@
 #include "DiamondSquareGenerator.h"
 
-#include <iostream>
+#include <cmath>
 
 #include "../utils/MathUtils.h"
 
