@@ -44,23 +44,6 @@ include("${PROJECT_SOURCE_DIR}/patches/ApplyPatches.cmake")
 add_subdirectory(external/VulkanLaunchpad)
 
 #================================#
-# GCG Framework (prebuilt lib)   #
-#================================#
-if(WIN32)
-    set(GCG_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/windows")
-    set(GCG_LIB_DEBUG "${GCG_LIB_DIR}/GCG_VK_Lib_Debug.lib")
-    set(GCG_LIB_RELEASE "${GCG_LIB_DIR}/GCG_VK_Lib_Release.lib")
-elseif(APPLE)
-    set(GCG_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/macos")
-    set(GCG_LIB_DEBUG "${GCG_LIB_DIR}/libGCG_VK_Lib_Debug.a")
-    set(GCG_LIB_RELEASE "${GCG_LIB_DIR}/libGCG_VK_Lib_Release.a")
-else()
-    set(GCG_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/linux")
-    set(GCG_LIB_DEBUG "${GCG_LIB_DIR}/libGCG_VK_Lib_Debug.a")
-    set(GCG_LIB_RELEASE "${GCG_LIB_DIR}/libGCG_VK_Lib_Release.a")
-endif()
-
-#================================#
 # Dear ImGui (GUI dependency)    #
 #================================#
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/imgui")
@@ -70,10 +53,6 @@ set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/imgui")
 #================================#
 add_executable(${PROJECT_NAME}
     src/Main.cpp
-    src/Camera.h
-    src/utils/VulkanHelpers.h
-    src/utils/VulkanHelpers.cpp
-    src/utils/Utils.h
     src/utils/MathUtils.h
     src/Camera/Camera.cpp
     src/terrain/TerrainGeometry.h
@@ -99,8 +78,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE
     VulkanLaunchpad
-    $<$<CONFIG:Debug>:${GCG_LIB_DEBUG}>
-    $<$<NOT:$<CONFIG:Debug>>:${GCG_LIB_RELEASE}>
 )
 add_dependencies(${PROJECT_NAME} VulkanLaunchpad)
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin LIBRARY DESTINATION lib ARCHIVE DESTINATION lib)

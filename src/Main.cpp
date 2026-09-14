@@ -26,8 +26,8 @@
 #include "terrain/DiamondSquareGenerator.h"
 #include "terrain/TerrainGeometry.h"
 #include "terrain/WaterGeometry.h"
+#include "utils/INIReader.h"
 #include "utils/PathUtils.h"
-#include "utils/Utils.h"
 
 #undef min
 #undef max
@@ -553,11 +553,8 @@ PFN_vkCmdPipelineBarrier2KHR g_vkCmdPipelineBarrier2KHR;
 // Main
 /* ------------------------------------------------ */
 
-int main(int argc, char** argv) {
+int main() {
     VKL_LOG(WELCOME_MSG);
-
-    CMDLineArgs cmdline_args;
-    gcgParseArgs(cmdline_args, argc, argv);
 
     /* --------------------------------------------- */
     // Load Settings From File
@@ -570,9 +567,6 @@ int main(int argc, char** argv) {
 
     window_title = window_reader.Get("window", "title", WINDOW_TITLE);
     std::string init_camera_filepath = "assets/settings/camera_terrain.ini";
-    if (cmdline_args.init_camera) {
-        init_camera_filepath = cmdline_args.init_camera_filepath;
-    }
     INIReader camera_reader(init_camera_filepath);
 
     float field_of_view = static_cast<float>(camera_reader.GetReal("camera", "fov", 60.0f));
@@ -589,9 +583,6 @@ int main(int argc, char** argv) {
     float camera_yaw = static_cast<float>(camera_reader.GetReal("camera", "yaw", 0.0f));
     float camera_pitch = static_cast<float>(camera_reader.GetReal("camera", "pitch", 0.0f));
     std::string init_renderer_filepath = "assets/settings/renderer_standard.ini";
-    if (cmdline_args.init_renderer) {
-        init_renderer_filepath = cmdline_args.init_renderer_filepath;
-    }
     INIReader renderer_reader(init_renderer_filepath);
     bool as_wireframe = renderer_reader.GetBoolean("renderer", "wireframe", false);
     if (as_wireframe) {
@@ -1189,26 +1180,6 @@ int main(int argc, char** argv) {
                 flyCamera
             );
             continue;
-        }
-
-        if (cmdline_args.run_headless) {
-            uint32_t idx = vklGetCurrentSwapChainImageIndex();
-            std::string screenshot_filename = "screenshot";
-            if (cmdline_args.set_filename) {
-                screenshot_filename = cmdline_args.filename;
-            }
-            gcgSaveScreenshot(
-                screenshot_filename,
-                swapchain_image_handles[idx],
-                window_width,
-                window_height,
-                surface_format.format,
-                vk_device,
-                vk_physical_device,
-                vk_queue,
-                selected_queue_family_index
-            );
-            break;
         }
     }
 

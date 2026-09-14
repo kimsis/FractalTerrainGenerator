@@ -1,8 +1,7 @@
 #include "WaterGeometry.h"
 
 #include <vector>
-
-#include "../utils/Utils.h"
+#include <VulkanLaunchpad.h>
 
 WaterChunkGeometry buildWaterChunkGeometry(const ChunkCoord& coord, const TerrainParams& baseParams) {
     int size = (1 << baseParams.gridSizeExponent) + 1;

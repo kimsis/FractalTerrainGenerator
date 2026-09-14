@@ -9,8 +9,8 @@
 #include "TerrainGeometry.h"
 
 #include <glm/gtc/constants.hpp>
+#include <VulkanLaunchpad.h>
 
-#include "../utils/Utils.h"
 #include "DiamondSquareGenerator.h"
 
 // Phase 1 of terrain generation: heights + positions + indices only, no normals. This is the part

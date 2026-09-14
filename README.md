@@ -28,10 +28,10 @@ teaching framework, plus [Dear ImGui](https://github.com/ocornut/imgui) for the 
 | Left-drag | Orbit the camera (trackball mode) |
 | Right-drag | Pan the camera (trackball mode) |
 | Scroll | Zoom (trackball mode) |
+| Mouse | Look around (fly mode) |
 | `W`/`A`/`S`/`D` | Move (fly mode) |
 | `Space` / `Left Ctrl` | Move up / down (fly mode) |
 | `Left Shift` | Move faster (fly mode) |
-| Mouse | Look around (fly mode) |
 | `R` | Reseed the terrain |
 | `F1` | Toggle wireframe |
 | `F2` | Cycle backface-culling mode |
@@ -70,8 +70,6 @@ applied automatically on every CMake configure, on all three platforms — no ma
 - Install [Visual Studio 2022 Community](https://visualstudio.microsoft.com/vs/community/) (or the
   [Build Tools for Visual Studio 2022](https://visualstudio.microsoft.com/downloads/?q=build+tools)
   if you don't need the full IDE), selecting the **Desktop development with C++** workload.
-  - **This project must be built with MSVC, not MinGW.** The prebuilt Camera library under `lib/`
-    is compiled with MSVC's C++ ABI; a MinGW-built executable cannot link against it.
 - Install [CMake](https://cmake.org/download/) (or use the one bundled with Visual Studio), version
   3.14+, with "Add CMake to the system PATH" enabled if installing standalone.
 
