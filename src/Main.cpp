@@ -171,7 +171,15 @@ struct UniformBufferVert {
 
     /*! Storage for the view-projection matrix, consisting of 16 float values (inherently aligned to 16 bytes) */
     glm::mat4 viewProjMatrix;
+};
 
+/*!
+ *	Per-chunk blend state for terrain.vert, pushed via vkCmdPushConstants immediately before each
+ *	chunk's draw call — a uniform buffer can't hold a different value per draw call within one
+ *	frame, since all of a frame's host writes to it land before the GPU executes any of that
+ *	frame's draws.
+ */
+struct TerrainPushConstants {
     /*! 0-1 float for the smooth transition between hurst/seed changes */
     float blendFactor;
 
@@ -1730,6 +1738,8 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
         /* --------------------------------------------- */
         kTerrainCullModes[cull_mode_index],
         scene.descriptorSetLayoutBindings,
+        /* enableAlphaBlending: */ false,
+        {VkPushConstantRange{VK_SHADER_STAGE_VERTEX_BIT, 0u, sizeof(TerrainPushConstants)}},
     };
     return vklCreateGraphicsPipeline(pipeline_config);
 }
@@ -1809,8 +1819,6 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
     ub_vert_data.modelMatrix = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, scene.heightScale));
     ub_vert_data.modelMatrixForNormals = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, 1 / scene.heightScale));
     ub_vert_data.viewProjMatrix = camera->getViewProjectionMatrix();
-    ub_vert_data.blendFactor = 1.0f;
-    ub_vert_data.isBlending = 0;
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_vert, &ub_vert_data, sizeof(UniformBufferVert));
 
     UniformBufferFrag ub_frag_data;
@@ -1824,6 +1832,18 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
     if (selected_pipeline == VK_NULL_HANDLE) {
         selected_pipeline = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
     }
+
+    // Currently identical for every chunk (no per-chunk blend yet), so pushed once here rather
+    // than per draw call.
+    TerrainPushConstants push_constants{1.0f, 0u};
+    vkCmdPushConstants(
+        vklGetCurrentCommandBuffer(),
+        vklGetLayoutForPipeline(selected_pipeline),
+        VK_SHADER_STAGE_VERTEX_BIT,
+        0u,
+        sizeof(TerrainPushConstants),
+        &push_constants
+    );
 
     // One draw call per loaded chunk, all against the same pipeline/descriptor set above — only
     // the vertex/index buffers differ per chunk. No blending yet, so the same Geometry is passed

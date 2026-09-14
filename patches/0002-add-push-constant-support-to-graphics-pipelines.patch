@@ -1,0 +1,34 @@
+diff --git a/VulkanLaunchpad.h b/VulkanLaunchpad.h
+--- a/VulkanLaunchpad.h
++++ b/VulkanLaunchpad.h
+@@ -169,6 +169,13 @@
+      *    dstColorBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+      */
+     bool enableAlphaBlending = false;
++
++    /*!
++     *	Push constant ranges for this pipeline's layout, if any. Leave empty (the default) for a
++     *	pipeline that doesn't use push constants. Added at the end so existing positional
++     *	initializers of this struct keep compiling unchanged.
++     */
++    std::vector<VkPushConstantRange> pushConstantRanges = {};
+ };
+ 
+ /*!
+diff --git a/VulkanLaunchpad.cpp b/VulkanLaunchpad.cpp
+--- a/VulkanLaunchpad.cpp
++++ b/VulkanLaunchpad.cpp
+@@ -648,10 +648,13 @@
+ 
+ 	// Continue with configuring our graphics pipeline:
+ 	// Create a PIPELINE LAYOUT which describes all RESOURCES that are passed in to our pipeline (Resource Descriptors that we have created above)
++	std::vector<vk::PushConstantRange> pushConstantRanges(std::begin(config.pushConstantRanges), std::end(config.pushConstantRanges));
+ 	auto pipelineLayout = mDevice.createPipelineLayoutUnique(
+ 		vk::PipelineLayoutCreateInfo{} // A pipeline's layout describes all resources used by a pipeline or in shaders.
+ 			.setSetLayoutCount(1u)
+ 			.setPSetLayouts(&descriptorSetLayout.get()) // We don't need the actual descriptors when defining the PIPELINE. The LAYOUT is sufficient at this point.
++			.setPushConstantRangeCount(static_cast<uint32_t>(pushConstantRanges.size()))
++			.setPPushConstantRanges(pushConstantRanges.data())
+ 		, nullptr, mDispatchLoader
+ 	);
+ 

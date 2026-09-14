@@ -9,9 +9,12 @@ layout (binding = 0) uniform UniformBufferVert {
 	mat4 modelMatrix;
 	mat4 modelMatrixForNormals;
 	mat4 viewProjMatrix;
+} ub_data;
+
+layout (push_constant) uniform TerrainPushConstants {
 	float blendFactor;
 	bool isBlending;
-} ub_data;
+} pc;
 
 layout (location = 0) out VertexData {
 	vec4 position_world;
@@ -23,12 +26,12 @@ void main() {
 	vec4 position_world_to = ub_data.modelMatrix * vec4(in_position_to, 1);
 	vec3 normal_world_to = mat3(ub_data.modelMatrixForNormals) * in_normal_to;
 
-	if (ub_data.isBlending) {
+	if (pc.isBlending) {
 		vec4 position_world_from = ub_data.modelMatrix * vec4(in_position_from, 1);
-		vert_out.position_world = mix(position_world_from, position_world_to, ub_data.blendFactor);
+		vert_out.position_world = mix(position_world_from, position_world_to, pc.blendFactor);
 
 		vec3 normal_world_from = mat3(ub_data.modelMatrixForNormals) * in_normal_from;
-		vert_out.normal_world = normalize(mix(normal_world_from, normal_world_to, ub_data.blendFactor));
+		vert_out.normal_world = normalize(mix(normal_world_from, normal_world_to, pc.blendFactor));
 	} else {
 		vert_out.position_world = position_world_to;
 		vert_out.normal_world = normal_world_to;
