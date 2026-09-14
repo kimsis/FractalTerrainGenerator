@@ -25,7 +25,13 @@ static std::vector<float> sampleRow(const GeometryData& data, int size, int loca
     return row;
 }
 
-void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::vec3& cameraPos) {
+// True if `geometry`'s buffers are all real (as opposed to the all-VK_NULL_HANDLE state a
+// LoadedChunk's `from` sits in whenever that chunk isn't currently blending).
+static bool isValidGeometry(const Geometry& geometry) {
+    return geometry.positionsBuffer != VK_NULL_HANDLE;
+}
+
+void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::vec3& cameraPos, double currentTime) {
     ChunkCoord center = cameraToChunkCoord(cameraPos, manager.baseParams);
     int destroyRadius = manager.viewRadius + 1;
     int size = (1 << manager.baseParams.gridSizeExponent) + 1;
@@ -114,15 +120,32 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
         it = manager.readyForNormals.erase(it);
     }
 
+    // Shared across steps 4-6 below: batches every GPU destroy this call into at most one
+    // vkDeviceWaitIdle, no matter how many separate reasons (blend completion, eviction) trigger one.
+    bool destroyed_any = false;
+
     // 4. Drain phase-2 results: combine the derived normals with the retained positions/indices and
-    // upload to the GPU, if still in range.
+    // upload to the GPU, if still in range. If this coordinate was already loaded, this is a
+    // regeneration (Hurst/seed changed — see invalidateAllLoadedChunks): snap its current `to` to be
+    // the new `from` and start a fresh blend toward the just-uploaded geometry, rather than
+    // replacing it outright. Callers are required to keep Hurst/reseed changes disabled while
+    // isRegenerating() is true, so `from` is guaranteed empty here — nothing mid-blend to supersede.
     for (auto it = manager.pendingNormals.begin(); it != manager.pendingNormals.end();) {
         if (it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
             std::vector<glm::vec3> normals = it->second.get();
             if (isWithinViewRadius(it->first, center, destroyRadius) && manager.chunkData.count(it->first)) {
                 GeometryData data = manager.chunkData[it->first];
                 data.normals = std::move(normals);
-                manager.loadedChunks[it->first] = createAndUploadIntoGpuMemory(data);
+                Geometry newGeometry = createAndUploadIntoGpuMemory(data);
+
+                auto existing = manager.loadedChunks.find(it->first);
+                if (existing == manager.loadedChunks.end()) {
+                    manager.loadedChunks[it->first] = LoadedChunk{Geometry{}, newGeometry, 0.0};
+                } else {
+                    existing->second.from = existing->second.to;
+                    existing->second.to = newGeometry;
+                    existing->second.blendStartTime = currentTime;
+                }
             }
             it = manager.pendingNormals.erase(it);
         } else {
@@ -130,17 +153,30 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
         }
     }
 
-    // 5. Destroy anything that's fallen more than (viewRadius + 1) chunks away (Chebyshev distance,
+    // 5. Destroy the now-unused `from` of any chunk whose blend has finished.
+    for (auto& entry : manager.loadedChunks) {
+        LoadedChunk& chunk = entry.second;
+        if (isValidGeometry(chunk.from) && currentTime - chunk.blendStartTime >= manager.blendDuration) {
+            if (!destroyed_any) {
+                vkDeviceWaitIdle(vk_device);
+                destroyed_any = true;
+            }
+            destroyGeometryGpuMemory(chunk.from);
+            chunk.from = Geometry{};
+        }
+    }
+
+    // 6. Destroy anything that's fallen more than (viewRadius + 1) chunks away (Chebyshev distance,
     // matching the square load window). GPU resources are freed with a synchronization guard (see
     // header); the retained CPU data has no such requirement.
-    bool destroyed_any = false;
     for (auto it = manager.loadedChunks.begin(); it != manager.loadedChunks.end();) {
         if (!isWithinViewRadius(it->first, center, destroyRadius)) {
             if (!destroyed_any) {
                 vkDeviceWaitIdle(vk_device);
                 destroyed_any = true;
             }
-            destroyGeometryGpuMemory(it->second);
+            if (isValidGeometry(it->second.from)) destroyGeometryGpuMemory(it->second.from);
+            destroyGeometryGpuMemory(it->second.to);
             it = manager.loadedChunks.erase(it);
         } else {
             ++it;
@@ -156,20 +192,24 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
     }
 }
 
-void destroyAllLoadedChunks(VkDevice vk_device, ChunkManager& manager) {
-    if (manager.loadedChunks.empty()) return;
-
-    vkDeviceWaitIdle(vk_device);
+void invalidateAllLoadedChunks(ChunkManager& manager) {
     for (auto& entry : manager.loadedChunks) {
-        destroyGeometryGpuMemory(entry.second);
         manager.chunkData.erase(entry.first);
     }
-    manager.loadedChunks.clear();
+}
+
+bool isRegenerating(const ChunkManager& manager) {
+    if (!manager.pendingChunks.empty() || !manager.readyForNormals.empty() || !manager.pendingNormals.empty()) return true;
+    for (auto& entry : manager.loadedChunks) {
+        if (isValidGeometry(entry.second.from)) return true;
+    }
+    return false;
 }
 
 void cleanupChunkManager(ChunkManager& manager) {
     for (auto& entry : manager.loadedChunks) {
-        destroyGeometryGpuMemory(entry.second);
+        if (isValidGeometry(entry.second.from)) destroyGeometryGpuMemory(entry.second.from);
+        destroyGeometryGpuMemory(entry.second.to);
     }
     manager.loadedChunks.clear();
 }

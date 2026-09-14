@@ -450,7 +450,7 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
  *	for it into the currently recording command buffer. Must be called between
  *	vklStartRecordingCommands() and vklEndRecordingCommands().
  */
-void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera* camera);
+void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera* camera, double currentTime);
 
 /*!
  *	Destroys all GPU resources owned by the given terrain scene.
@@ -1012,17 +1012,24 @@ int main(int argc, char** argv) {
             mouse_y_last = mouse_y;
         }
 
+        // Both triggers are ignored while a previous regeneration is still resolving or blending —
+        // the GUI already disables the Hurst slider/Reseed button for the same reason (see buildGUI),
+        // but the R key shortcut bypasses the GUI, so it needs this guard too.
         if (g_reseed_requested) {
             g_reseed_requested = false;
-            terrain_scene.chunkManager.baseParams.seed = generateRandomSeed();
-            destroyAllLoadedChunks(vk_device, terrain_scene.chunkManager);
+            if (!isRegenerating(terrain_scene.chunkManager)) {
+                terrain_scene.chunkManager.baseParams.seed = generateRandomSeed();
+                invalidateAllLoadedChunks(terrain_scene.chunkManager);
+            }
         }
 
         if (g_hurst_changed) {
             g_hurst_changed = false;
-            if (g_hurst != terrain_scene.chunkManager.baseParams.hurst) {
+            if (!isRegenerating(terrain_scene.chunkManager) && g_hurst != terrain_scene.chunkManager.baseParams.hurst) {
                 terrain_scene.chunkManager.baseParams.hurst = g_hurst;
-                destroyAllLoadedChunks(vk_device, terrain_scene.chunkManager);
+                invalidateAllLoadedChunks(terrain_scene.chunkManager);
+            } else {
+                g_hurst = terrain_scene.chunkManager.baseParams.hurst;
             }
         }
 
@@ -1030,7 +1037,7 @@ int main(int argc, char** argv) {
             g_chunk_view_radius_changed = false;
             terrain_scene.chunkManager.viewRadius = g_chunk_view_radius;
         }
-        updateLoadedChunks(vk_device, terrain_scene.chunkManager, activeCamera->getPosition());
+        updateLoadedChunks(vk_device, terrain_scene.chunkManager, activeCamera->getPosition(), currentFrameTime);
         updateWaterChunks(vk_device, water_scene, terrain_scene.chunkManager);
         {
             static size_t last_loaded = SIZE_MAX;
@@ -1124,7 +1131,7 @@ int main(int argc, char** argv) {
         }
         vklStartRecordingCommands();
 
-        updateAndDrawTerrainScene(vk_device, terrain_scene, activeCamera);
+        updateAndDrawTerrainScene(vk_device, terrain_scene, activeCamera, currentFrameTime);
         updateAndDrawWaterScene(water_scene, terrain_scene, activeCamera);
 
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
@@ -1812,7 +1819,7 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
     return scene;
 }
 
-void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera* camera) {
+void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera* camera, double currentTime) {
     // Shared, scene-level uniforms: identical for every chunk, since chunk position is already
     // baked into each chunk's own vertex data.
     UniformBufferVert ub_vert_data;
@@ -1833,24 +1840,24 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
         selected_pipeline = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
     }
 
-    // Currently identical for every chunk (no per-chunk blend yet), so pushed once here rather
-    // than per draw call.
-    TerrainPushConstants push_constants{1.0f, 0u};
-    vkCmdPushConstants(
-        vklGetCurrentCommandBuffer(),
-        vklGetLayoutForPipeline(selected_pipeline),
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0u,
-        sizeof(TerrainPushConstants),
-        &push_constants
-    );
+    VkCommandBuffer cb = vklGetCurrentCommandBuffer();
+    VkPipelineLayout pipeline_layout = vklGetLayoutForPipeline(selected_pipeline);
 
     // One draw call per loaded chunk, all against the same pipeline/descriptor set above — only
-    // the vertex/index buffers differ per chunk. No blending yet, so the same Geometry is passed
-    // as both "from" and "to".
+    // the vertex/index buffers and the push-constant blend state differ per chunk.
     for (auto& entry : scene.chunkManager.loadedChunks) {
-        const Geometry& chunk_geometry = entry.second;
-        drawGeometryWithMaterial(selected_pipeline, chunk_geometry, chunk_geometry, scene.ds_terrain);
+        const LoadedChunk& chunk = entry.second;
+        bool is_blending = chunk.from.positionsBuffer != VK_NULL_HANDLE;
+        float blend_factor =
+            is_blending
+                ? glm::clamp(static_cast<float>((currentTime - chunk.blendStartTime) / scene.chunkManager.blendDuration), 0.0f, 1.0f)
+                : 1.0f;
+
+        TerrainPushConstants push_constants{blend_factor, is_blending ? 1u : 0u};
+        vkCmdPushConstants(cb, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0u, sizeof(TerrainPushConstants), &push_constants);
+
+        const Geometry& geometry_from = is_blending ? chunk.from : chunk.to;
+        drawGeometryWithMaterial(selected_pipeline, geometry_from, chunk.to, scene.ds_terrain);
     }
 }
 
@@ -2014,7 +2021,7 @@ static size_t chunksStillGenerating(const ChunkManager& chunkManager) {
 }
 
 void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& chunkManager, const glm::vec3& cameraPos) {
-    updateLoadedChunks(vk_device, chunkManager, cameraPos);
+    updateLoadedChunks(vk_device, chunkManager, cameraPos, glfwGetTime());
     while (chunksStillGenerating(chunkManager) > 0) {
         glfwPollEvents();
 
@@ -2030,7 +2037,7 @@ void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& 
         vklEndRecordingCommands();
         vklPresentCurrentSwapchainImage();
 
-        updateLoadedChunks(vk_device, chunkManager, cameraPos);
+        updateLoadedChunks(vk_device, chunkManager, cameraPos, glfwGetTime());
     }
 }
 
@@ -2060,9 +2067,10 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     }
 
     size_t generating_count = chunksStillGenerating(scene.chunkManager);
-    bool generation_in_progress = generating_count > 0;
-    std::string generation_status_string =
-        generation_in_progress ? "Generating (" + std::to_string(generating_count) + " chunks)" : "Generated";
+    bool is_regenerating = isRegenerating(scene.chunkManager);
+    std::string generation_status_string = generating_count > 0     ? "Generating (" + std::to_string(generating_count) + " chunks)"
+                                            : is_regenerating        ? "Blending..."
+                                                                      : "Generated";
     const char* generation_status_text = generation_status_string.c_str();
     float generation_status_offset = (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(generation_status_text).x) * 0.5f;
     if (generation_status_offset > 0.0f) {
@@ -2070,11 +2078,13 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     }
     ImGui::Text("%s", generation_status_text);
 
+    ImGui::BeginDisabled(is_regenerating);
     labelThenRightAlignedWidget("Hurst Exponent", kSliderWidth);
     ImGui::SliderFloat("##hurst", &g_hurst, 0.0f, 1.0f, "%f", flags_for_sliders);
     if (ImGui::IsItemDeactivatedAfterEdit()) {
         g_hurst_changed = true;
     }
+    ImGui::EndDisabled();
 
     labelThenRightAlignedWidget("Height Scale", kSliderWidth);
     ImGui::SliderFloat("##heightScale", &scene.heightScale, 0.000001f, 5.0f, "%f", flags_for_sliders);
@@ -2094,9 +2104,11 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     std::string seed_label = "Current seed: " + std::to_string(scene.chunkManager.baseParams.seed);
     float reseed_button_width = ImGui::CalcTextSize("Reseed").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     labelThenRightAlignedWidget(seed_label.c_str(), reseed_button_width);
+    ImGui::BeginDisabled(is_regenerating);
     if (ImGui::Button("Reseed")) {
         g_reseed_requested = true;
     }
+    ImGui::EndDisabled();
 
     ImGui::Text("Camera Mode: %s", g_toggle_camera ? "Fly" : "Trackball");
     ImGui::Text("Camera Position: (%.2f, %.2f, %.2f)", cameraPosition.x, cameraPosition.y, cameraPosition.z);
