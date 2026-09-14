@@ -464,6 +464,8 @@ void labelThenRightAlignedWidget(const char* label, float widget_width);
  *	statistical weaknesses in its low-order bits.
  */
 uint32_t generateRandomSeed();
+float generateRandomHurst();
+float generateRandomHeightScale();
 
 /*!
  * Builds the ImGUI Sidebar
@@ -535,6 +537,13 @@ static int g_chunk_view_radius = 8;
 static bool g_chunk_view_radius_changed = false;
 static float g_hurst = 0.8f;
 static bool g_hurst_changed = false;
+// Demo mode (F4): keeps re-randomizing Hurst/seed, one right after the previous blend settles, so
+// the terrain keeps morphing on its own while flying around for a recording.
+static bool g_demo_mode = false;
+// Demo mode's height-scale drift: negative is a sentinel meaning "not started yet".
+static double g_demo_height_interp_start_time = -1.0;
+static float g_demo_height_start = 1.0f;
+static float g_demo_height_target = 1.0f;
 
 /*!
  *	A flag that will be set during initialization code.
@@ -1050,6 +1059,37 @@ int main() {
             }
         }
 
+        // Demo mode (F4): fires the instant the previous regeneration's blend has fully settled, so
+        // the terrain keeps morphing continuously without ever overlapping two regenerations.
+        if (g_demo_mode && !isRegenerating(terrain_scene.chunkManager)) {
+            g_hurst = generateRandomHurst();
+            terrain_scene.chunkManager.baseParams.hurst = g_hurst;
+            terrain_scene.chunkManager.baseParams.seed = generateRandomSeed();
+            invalidateAllLoadedChunks(terrain_scene.chunkManager);
+        }
+
+        // Demo mode's height scale: independent of the above, since it's just a real-time uniform
+        // (no regeneration needed) — picks a new random target every second and smoothly interpolates
+        // toward it, so the exaggeration keeps drifting continuously instead of popping.
+        if (g_demo_mode) {
+            constexpr double kDemoHeightInterpDuration = 1.0;
+            if (g_demo_height_interp_start_time < 0.0) {
+                // First activation: interpolate from whatever the height scale currently is.
+                g_demo_height_start = terrain_scene.heightScale;
+                g_demo_height_target = generateRandomHeightScale();
+                g_demo_height_interp_start_time = currentFrameTime;
+            }
+            double elapsed = currentFrameTime - g_demo_height_interp_start_time;
+            if (elapsed >= kDemoHeightInterpDuration) {
+                g_demo_height_start = g_demo_height_target;
+                g_demo_height_target = generateRandomHeightScale();
+                g_demo_height_interp_start_time = currentFrameTime;
+                elapsed = 0.0;
+            }
+            float t = static_cast<float>(glm::clamp(elapsed / kDemoHeightInterpDuration, 0.0, 1.0));
+            terrain_scene.heightScale = glm::mix(g_demo_height_start, g_demo_height_target, t);
+        }
+
         if (g_chunk_view_radius_changed) {
             g_chunk_view_radius_changed = false;
             terrain_scene.chunkManager.viewRadius = g_chunk_view_radius;
@@ -1365,6 +1405,9 @@ void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int a
     }
     if (key == GLFW_KEY_R) {
         g_reseed_requested = true;
+    }
+    if (key == GLFW_KEY_F4) {
+        g_demo_mode = !g_demo_mode;
     }
 }
 
@@ -2055,6 +2098,20 @@ uint32_t generateRandomSeed() {
     return dist(rng);
 }
 
+// Inset from the slider's full [0,1] range to avoid the visually-degenerate extremes (near-flat at
+// 1, near-white-noise at 0).
+float generateRandomHurst() {
+    static std::mt19937 rng(std::random_device{}());
+    static std::uniform_real_distribution<float> dist(0.4f, 0.95f);
+    return dist(rng);
+}
+
+float generateRandomHeightScale() {
+    static std::mt19937 rng(std::random_device{}());
+    static std::uniform_real_distribution<float> dist(1.0f, 5.0f);
+    return dist(rng);
+}
+
 void labelThenRightAlignedWidget(const char* label, float widget_width) {
     ImGui::Spacing();
     float right_edge_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
@@ -2121,6 +2178,9 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     }
     ImGui::EndDisabled();
 
+    if (g_demo_mode) {
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.0f, 1.0f), "Demo mode (F4): ON");
+    }
     ImGui::Text("Camera Mode: %s", g_toggle_camera ? "Fly" : "Trackball");
     ImGui::Text("Camera Position: (%.2f, %.2f, %.2f)", cameraPosition.x, cameraPosition.y, cameraPosition.z);
     ImGui::Text("Camera Forward:  (%.2f, %.2f, %.2f)", cameraForward.x, cameraForward.y, cameraForward.z);
