@@ -27,7 +27,7 @@ static std::vector<float> sampleRow(const GeometryData& data, int size, int loca
 
 void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::vec3& cameraPos) {
     ChunkCoord center = cameraToChunkCoord(cameraPos, manager.baseParams);
-    int evictRadius = manager.viewRadius + 1;
+    int destroyRadius = manager.viewRadius + 1;
     int size = (1 << manager.baseParams.gridSizeExponent) + 1;
 
     // 1. Kick off phase-1 generation (heights/positions/indices, no normals) for anything in the
@@ -50,7 +50,7 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
     for (auto it = manager.pendingChunks.begin(); it != manager.pendingChunks.end();) {
         if (it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
             GeometryData data = it->second.get();
-            if (isWithinViewRadius(it->first, center, evictRadius)) {
+            if (isWithinViewRadius(it->first, center, destroyRadius)) {
                 manager.chunkData[it->first] = std::move(data);
                 manager.readyForNormals.insert(it->first);
             }
@@ -64,7 +64,7 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
     // every still-relevant neighbor (i.e. one that will actually be generated at the current view
     // radius) has *also* finished phase 1. Each needed boundary row/column is copied off the main
     // thread here (cheap — O(size), not a full regeneration) and handed to the background task, so
-    // the task doesn't touch manager state that might be evicted while it's running. A neighbor
+    // the task doesn't touch manager state that might be destroyed while it's running. A neighbor
     // that's outside the view radius can never resolve that edge with real data, so it's left as
     // nullptr and deriveTerrainNormals() falls back to extrapolating it instead of waiting forever.
     static const ChunkCoord kOffsets[4] = {{-1, 0}, {1, 0}, {0, 1}, {0, -1}};  // left, right, top, bottom
@@ -119,7 +119,7 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
     for (auto it = manager.pendingNormals.begin(); it != manager.pendingNormals.end();) {
         if (it->second.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
             std::vector<glm::vec3> normals = it->second.get();
-            if (isWithinViewRadius(it->first, center, evictRadius) && manager.chunkData.count(it->first)) {
+            if (isWithinViewRadius(it->first, center, destroyRadius) && manager.chunkData.count(it->first)) {
                 GeometryData data = manager.chunkData[it->first];
                 data.normals = std::move(normals);
                 manager.loadedChunks[it->first] = createAndUploadIntoGpuMemory(data);
@@ -130,15 +130,15 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
         }
     }
 
-    // 5. Evict anything that's fallen more than (viewRadius + 1) chunks away (Chebyshev distance,
+    // 5. Destroy anything that's fallen more than (viewRadius + 1) chunks away (Chebyshev distance,
     // matching the square load window). GPU resources are freed with a synchronization guard (see
     // header); the retained CPU data has no such requirement.
-    bool evicted_any = false;
+    bool destroyed_any = false;
     for (auto it = manager.loadedChunks.begin(); it != manager.loadedChunks.end();) {
-        if (!isWithinViewRadius(it->first, center, evictRadius)) {
-            if (!evicted_any) {
+        if (!isWithinViewRadius(it->first, center, destroyRadius)) {
+            if (!destroyed_any) {
                 vkDeviceWaitIdle(vk_device);
-                evicted_any = true;
+                destroyed_any = true;
             }
             destroyGeometryGpuMemory(it->second);
             it = manager.loadedChunks.erase(it);
@@ -147,13 +147,24 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
         }
     }
     for (auto it = manager.chunkData.begin(); it != manager.chunkData.end();) {
-        if (!isWithinViewRadius(it->first, center, evictRadius)) {
+        if (!isWithinViewRadius(it->first, center, destroyRadius)) {
             manager.readyForNormals.erase(it->first);
             it = manager.chunkData.erase(it);
         } else {
             ++it;
         }
     }
+}
+
+void destroyAllLoadedChunks(VkDevice vk_device, ChunkManager& manager) {
+    if (manager.loadedChunks.empty()) return;
+
+    vkDeviceWaitIdle(vk_device);
+    for (auto& entry : manager.loadedChunks) {
+        destroyGeometryGpuMemory(entry.second);
+        manager.chunkData.erase(entry.first);
+    }
+    manager.loadedChunks.clear();
 }
 
 void cleanupChunkManager(ChunkManager& manager) {

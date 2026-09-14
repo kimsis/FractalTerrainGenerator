@@ -266,10 +266,7 @@ struct Hit {
 
 /*!
  *	Holds every GPU resource that makes up the water plane: one pipeline/descriptor set/uniform
- *	buffer shared by all chunks (updated once per frame, just like terrain's ub_terrain_vert), and
- *	one small baked quad per currently-loaded terrain chunk — created when a chunk loads and
- *	destroyed when it's evicted, mirroring ChunkManager::loadedChunks' own lifecycle (see
- *	updateWaterChunks).
+ *	buffer shared by all chunks, and one small baked quad per currently-loaded terrain chunk.
  */
 struct WaterScene {
     VkDescriptorSetLayout descriptor_set_layout;
@@ -460,20 +457,15 @@ WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_para
 
 /*!
  *	Creates a small world-space-baked water quad for any newly-loaded terrain chunk, and destroys
- *	it for any chunk that's since been evicted — call once per frame, right after
- *	updateLoadedChunks(), so this always reflects that same frame's loadedChunks set. Must be called
- *	*outside* vklStartRecordingCommands()/vklEndRecordingCommands(), since destroying an evicted
- *	chunk's geometry needs a vkDeviceWaitIdle guard first (a previous frame's command buffer might
- *	still be referencing it — same concern as ChunkManager's own chunk eviction).
+ *	it for any chunk that's since been unloaded. Call once per frame, right after
+ *	updateLoadedChunks(), outside vklStartRecordingCommands()/vklEndRecordingCommands().
  */
 void updateWaterChunks(VkDevice vk_device, WaterScene& scene, const ChunkManager& chunkManager);
 
 /*!
- *	Updates the water plane's shared uniform buffer once (model matrix translating by the terrain
- *	scene's current waterLevel/heightScale — identical for every chunk, since XY is already baked
- *	into each chunk's own vertex data) and records one draw call per loaded chunk's water geometry.
- *	Must be called between vklStartRecordingCommands() and vklEndRecordingCommands(), after the
- *	terrain has been drawn.
+ *	Updates the water plane's shared uniform buffer and records one draw call per loaded chunk's
+ *	water geometry. Must be called between vklStartRecordingCommands() and vklEndRecordingCommands(),
+ *	after the terrain has been drawn.
  */
 void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scene, const Camera* camera);
 
@@ -507,6 +499,8 @@ static bool g_reseed_requested = false;
 static float g_camera_speed = 5.0f;
 static int g_chunk_view_radius = 8;
 static bool g_chunk_view_radius_changed = false;
+static float g_hurst = 0.8f;
+static bool g_hurst_changed = false;
 
 /*!
  *	A flag that will be set during initialization code.
@@ -834,8 +828,7 @@ int main(int argc, char** argv) {
 
     // Create a camera helper object, positioned/oriented per camera_terrain.ini. The trackball
     // camera's target is derived by raycasting the configured position/direction against the
-    // terrain (same conversion used for live trackball<->fly switching further below), falling
-    // back to the origin if that ray doesn't hit the terrain (e.g. looking up).
+    // terrain, falling back to the origin if that ray doesn't hit the terrain (e.g. looking up).
     FlyCamera flyCamera(field_of_view, aspect_ratio, near_plane_distance, far_plane_distance);
     flyCamera.translate(camera_position);
     flyCamera.rotate(glm::radians(camera_yaw), glm::radians(camera_pitch));
@@ -1014,6 +1007,15 @@ int main(int argc, char** argv) {
         if (g_reseed_requested) {
             g_reseed_requested = false;
             terrain_scene.chunkManager.baseParams.seed = generateRandomSeed();
+            destroyAllLoadedChunks(vk_device, terrain_scene.chunkManager);
+        }
+
+        if (g_hurst_changed) {
+            g_hurst_changed = false;
+            if (g_hurst != terrain_scene.chunkManager.baseParams.hurst) {
+                terrain_scene.chunkManager.baseParams.hurst = g_hurst;
+                destroyAllLoadedChunks(vk_device, terrain_scene.chunkManager);
+            }
         }
 
         if (g_chunk_view_radius_changed) {
@@ -1737,6 +1739,7 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
     scene.heightScale = 1.0f;
     scene.chunkManager.baseParams = params;
     scene.chunkManager.viewRadius = g_chunk_view_radius;
+    g_hurst = params.hurst;
 
     /* --------------------------------------------- */
     // Create a Custom Graphics Pipeline
@@ -1801,9 +1804,7 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
 
 void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera* camera) {
     // Shared, scene-level uniforms: identical for every chunk, since chunk position is already
-    // baked into each chunk's own vertex data (no per-chunk model matrix needed) and chunks don't
-    // blend yet (isBlending is always false here; see PLAN.md §10 Step 11 for the planned per-chunk
-    // blend, which will need this to become per-chunk instead).
+    // baked into each chunk's own vertex data.
     UniformBufferVert ub_vert_data;
     ub_vert_data.modelMatrix = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, scene.heightScale));
     ub_vert_data.modelMatrixForNormals = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, 1 / scene.heightScale));
@@ -1910,29 +1911,26 @@ WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_para
     };
     vkUpdateDescriptorSets(vk_device, 1u, &write, 0u, nullptr);
 
-    // Per-chunk geometry (chunkGeometry) is created lazily in updateWaterChunks() as chunks load,
-    // not here — there's nothing loaded yet at setup time.
+    // chunkGeometry is populated lazily by updateWaterChunks() as chunks load.
     return scene;
 }
 
 void updateWaterChunks(VkDevice vk_device, WaterScene& scene, const ChunkManager& chunkManager) {
-    // Create a water quad for any newly-loaded terrain chunk. Each is an independent buffer, so —
-    // just like loading a new terrain chunk — no synchronization is needed here.
+    // Create a water quad for any newly-loaded terrain chunk.
     for (auto& entry : chunkManager.loadedChunks) {
         const ChunkCoord& coord = entry.first;
         if (scene.chunkGeometry.count(coord)) continue;
         scene.chunkGeometry[coord] = buildWaterChunkGeometry(coord, chunkManager.baseParams);
     }
 
-    // Destroy the water quad for any chunk that's no longer loaded (evicted). Wait for the GPU to
-    // finish first — a previous frame's command buffer may still be referencing these buffers (same
-    // concern as ChunkManager::updateLoadedChunks evicting terrain geometry).
-    bool evicted_any = false;
+    // Destroy the water quad for any chunk that's no longer loaded. Wait for the GPU to finish first
+    // — a previous frame's command buffer may still be referencing these buffers.
+    bool destroyed_any = false;
     for (auto it = scene.chunkGeometry.begin(); it != scene.chunkGeometry.end();) {
         if (!chunkManager.loadedChunks.count(it->first)) {
-            if (!evicted_any) {
+            if (!destroyed_any) {
                 vkDeviceWaitIdle(vk_device);
-                evicted_any = true;
+                destroyed_any = true;
             }
             destroyWaterChunkGeometry(it->second);
             it = scene.chunkGeometry.erase(it);
@@ -1954,7 +1952,7 @@ void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scen
     vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, scene.pipeline);
 
     // One draw call per loaded chunk's water tile, all against the same pipeline/descriptor set
-    // above — only the vertex/index buffers differ per chunk, just like terrain's own chunk loop.
+    // above — only the vertex/index buffers differ per chunk.
     for (auto& entry : scene.chunkGeometry) {
         const WaterChunkGeometry& geometry = entry.second;
         VkBuffer vertex_buffers[1] = {geometry.positionsBuffer};
@@ -2052,10 +2050,11 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     }
     ImGui::Text("%s", generation_status_text);
 
-    // Hurst/seed only affect chunks generated from this point on — retroactively regenerating
-    // already-loaded chunks is PLAN.md §10 Step 11, not yet implemented.
     labelThenRightAlignedWidget("Hurst Exponent", kSliderWidth);
-    ImGui::SliderFloat("##hurst", &scene.chunkManager.baseParams.hurst, 0.0f, 1.0f, "%f", flags_for_sliders);
+    ImGui::SliderFloat("##hurst", &g_hurst, 0.0f, 1.0f, "%f", flags_for_sliders);
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+        g_hurst_changed = true;
+    }
 
     labelThenRightAlignedWidget("Height Scale", kSliderWidth);
     ImGui::SliderFloat("##heightScale", &scene.heightScale, 0.000001f, 5.0f, "%f", flags_for_sliders);
@@ -2076,7 +2075,7 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     float reseed_button_width = ImGui::CalcTextSize("Reseed").x + ImGui::GetStyle().FramePadding.x * 2.0f;
     labelThenRightAlignedWidget(seed_label.c_str(), reseed_button_width);
     if (ImGui::Button("Reseed")) {
-        scene.chunkManager.baseParams.seed = generateRandomSeed();
+        g_reseed_requested = true;
     }
 
     ImGui::Text("Camera Mode: %s", g_toggle_camera ? "Fly" : "Trackball");
