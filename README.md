@@ -1,210 +1,147 @@
-# Vulkan Launchpad Starter :rocket:
+# Fractal Terrain Generator :mountain:
 
-Starter template for a project based on [Vulkan Launchpad](https://github.com/cg-tuwien/VulkanLaunchpad)
+A real-time fractal terrain viewer built with Vulkan, for the "Fractals VU" course assignment
+(Diamond-Square terrain generation). Terrain is generated on the CPU using the Diamond-Square
+algorithm driven by a deterministic coordinate-hash PRNG (not a stateful RNG), streamed in as
+tileable chunks around the camera, and rendered with a directional light, a transparent water
+plane, and a GUI for tweaking generation parameters live.
 
-Sections:
-- [Setup Instructions](#setup-instructions)
-- [Documentation](#documentation)
+Built on top of [Vulkan Launchpad](https://github.com/cg-tuwien/VulkanLaunchpad), a thin C++/Vulkan
+teaching framework, plus [Dear ImGui](https://github.com/ocornut/imgui) for the control panel.
 
-# Setup Instructions
+## Features
 
-_Note:_ These setup instructions are an extended edition of [Vulkan Launchpad](https://github.com/cg-tuwien/VulkanLaunchpad)'s.
+- Diamond-Square heightfield generation with a GUI-adjustable Hurst exponent, height scale, and
+  reseed button
+- Smooth ~2-second blend transition when the Hurst exponent or seed changes, instead of an instant pop
+- Infinite, chunked terrain streaming around the camera (chunks generate/unload as you move, with
+  seamlessly matching edges between neighbors)
+- Trackball camera (orbit/pan/zoom) and a WASD + mouselook fly camera, toggleable at runtime
+- A transparent, GUI-adjustable water plane
+- Resizable window
 
-Vulkan Launchpad runs on Windows, macOS, and Linux. For building you'll need [Git](https://git-scm.com/), the [Vulkan SDK](https://www.lunarg.com/vulkan-sdk/), a C++ compiler, [CMake](https://cmake.org/), and optimally an integrated development environment (IDE). In the following, we describe setup instructions for common operating systems and editors/IDEs (click the links in the table of contents to jump to the sections that are relevant to your chosen setup):
-- [Operating Systems](#operating-systems)
-    - [Windows](#windows)
-    - [macOS](#macos)
-    - [Linux](#linux)
-        - [Ubuntu and Linux Mint](#ubuntu-and-linux-mint)
-        - [Fedora Workstation](#fedora-workstation)
-        - [Manjaro](#manjaro)
-- [Editors and IDEs](#editors-and-ides)
-    - [Visual Studio Code (VS Code)](#visual-studio-code-vs-code)
-    - [Visual Studio 2022 Community](#visual-studio-2022-community)
-    - [Xcode](#xcode)
-    - [Other IDEs](#other-ides)
-- [Troubleshooting](#troubleshooting)
-    - [Submodule Updates Take a Long Time](#submodule-updates-take-a-long-time)
-    - [On macOS: CMake cannot find C/CXX compiler](#on-macos-cmake-cannot-find-ccxx-compiler)
-    - [On macOS: CMake cannot find Vulkan](#on-macos-cmake-cannot-find-vulkan)
-    - [ERROR: No GLFW window created](#error-no-glfw-window-created)
+## Controls
 
-## Operating Systems
+| Input | Action |
+|---|---|
+| `C` | Toggle between trackball and fly camera |
+| Left-drag | Orbit the camera (trackball mode) |
+| Right-drag | Pan the camera (trackball mode) |
+| Scroll | Zoom (trackball mode) |
+| `W`/`A`/`S`/`D` | Move (fly mode) |
+| `Space` / `Left Ctrl` | Move up / down (fly mode) |
+| `Left Shift` | Move faster (fly mode) |
+| Mouse | Look around (fly mode) |
+| `R` | Reseed the terrain |
+| `F1` | Toggle wireframe |
+| `F2` | Cycle backface-culling mode |
+| `N` | Toggle normals debug view |
+| `Esc` | Quit |
+
+The Hurst exponent, height scale, water level, camera speed, view radius, and reseed button are all
+adjustable live from the "Terrain Settings" GUI panel.
+
+## Building
+
+### Prerequisites (all platforms)
+
+- [Git](https://git-scm.com/)
+- [CMake](https://cmake.org/) 3.14 or newer
+- A C++17 compiler
+- A recent [Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
+
+Clone the repository with submodules (Vulkan Launchpad, Dear ImGui, and their own dependencies are
+pulled in this way):
+
+```bash
+git clone --recurse-submodules https://github.com/kimsis/FractalTerrainGenerator.git
+cd FractalTerrainGenerator
+```
+
+If you already cloned without `--recurse-submodules`, run `git submodule update --init --recursive`
+from the repo root instead. Local fixes to the Vulkan Launchpad submodule (see `patches/`) are
+applied automatically on every CMake configure, on all three platforms — no manual step needed.
 
 ### Windows
-- Download and install [Git for Windows](https://git-scm.com/download/win)!
-    - Add Git to your PATH! This can be done through the installer, selecting the `Git from the command line and also from 3rd-party software` option. 
-- Download and install one of the latest [Vulkan SDKs for Windows](https://vulkan.lunarg.com/sdk/home#windows)! (At time of writing, the most recent version is 1.3.243.0.)
-    - _Note:_ It is not required to install any optional components, if you make only x64 builds.
-- Download and install the Microsoft Visual C++ compiler (MSVC) by installing the [Build Tools for Visual Studio 2022](https://visualstudio.microsoft.com/downloads/?q=build+tools) or a newer version!
-    - Select the `Desktop development with C++` workload in the installer!
-    - _Note:_ Should you decide to install Visual Studio Community 2022 (as described below), you don't have to install the Build Tools for Visual Studio 2022 separately. Also in this case of using the Visual Studio Community 2022 installer, ensure to select the `Desktop development with C++` workload! 
-- Download and install CMake through its [Windows x64 Installer](https://cmake.org/download/)!
-    - Select an option to `Add CMake to the system PATH ...` during installation!
-    - _Important:_ Ensure to get CMake version `3.22` or newer!
+
+- Install [Git for Windows](https://git-scm.com/download/win) (select "Git from the command line
+  and also from 3rd-party software" so `git` is on your `PATH`).
+- Install a recent [Vulkan SDK for Windows](https://vulkan.lunarg.com/sdk/home#windows).
+- Install [Visual Studio 2022 Community](https://visualstudio.microsoft.com/vs/community/) (or the
+  [Build Tools for Visual Studio 2022](https://visualstudio.microsoft.com/downloads/?q=build+tools)
+  if you don't need the full IDE), selecting the **Desktop development with C++** workload.
+  - **This project must be built with MSVC, not MinGW.** The prebuilt Camera library under `lib/`
+    is compiled with MSVC's C++ ABI; a MinGW-built executable cannot link against it.
+- Install [CMake](https://cmake.org/download/) (or use the one bundled with Visual Studio), version
+  3.14+, with "Add CMake to the system PATH" enabled if installing standalone.
+
+Then either:
+- **Open the folder in Visual Studio**: `File -> Open -> Folder...`, select the repo root. Visual
+  Studio will run CMake automatically; once it finishes, `Build -> Build All` (`Ctrl+Shift+B`), then
+  select `VulkanLaunchpadStarter.exe (in workspaceRoot)` as the startup item to run/debug it.
+- **Or from a Developer Command Prompt / Developer PowerShell**:
+  ```powershell
+  cmake -S . -B build
+  cmake --build build --config Release
+  ```
+  The executable is written under `build\Release\` (or `build\Debug\`). Run it from the repository
+  root, since it loads shaders/settings via paths relative to the executable and its parent
+  directories (e.g. `assets/shaders/...`).
 
 ### macOS
 
-- Download and install [Xcode](https://apps.apple.com/us/app/xcode/id497799835) from the Mac App Store!
-  - Install the `Xcode Command Line Tools` by executing `xcode-select --install` from command line. This will install `Git` on your system.
-- Download and install one of the latest [Vulkan SDKs for macOS](https://vulkan.lunarg.com/sdk/home#mac)! (At time of writing, the most recent version is 1.3.243.0.)
-  - _Note:_ If you are using a Mac which runs on Apple silicon, it could happen that a popup asks you to install Rosetta. Please confirm, even though we are going to use native Apple silicon libraries.
-  - _Important:_ Make sure to tick the box called `System Global Installation` during installation so the Vulkan SDK can be found by the build system.
-- Download and install CMake through its [macOS universal Installer](https://cmake.org/download/) or through a package manager like [Homebrew](https://formulae.brew.sh/formula/cmake)!
-  - _Note:_ The official website installer will not automatically add CMake to the system PATH. If you are planning to use CMake from the command line, you need to open the CMake app, go to `Tools -> How to Install For Command Line Use` and execute one of the three instructions listed.
-  - _Important:_ Ensure to get CMake version `3.22` or newer!
+- Install Xcode Command Line Tools: `xcode-select --install` (this also installs `git`).
+- Install a recent [Vulkan SDK for macOS](https://vulkan.lunarg.com/sdk/home#mac), making sure to
+  tick **System Global Installation** during setup so CMake can find it.
+- Install [CMake](https://cmake.org/download/) 3.14+, e.g. via
+  [Homebrew](https://formulae.brew.sh/formula/cmake): `brew install cmake`.
+
+Then, from the repo root:
+
+```bash
+cmake -S . -B build -G Ninja   # or omit -G Ninja to use Xcode/Makefiles
+cmake --build build
+./build/VulkanLaunchpadStarter
+```
+
+(Run it from the repo root — asset paths are resolved relative to it.)
 
 ### Linux
 
-Requirements: C++ Compiler, [Git](https://git-scm.com/), [CMake](https://cmake.org/), [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#linux), [X.Org](https://www.x.org/wiki/) and Vulkan compatible driver.
+Requirements: a C++ compiler, Git, CMake, a Vulkan SDK/loader + validation layers, and an X11 or
+Wayland development environment (via GLFW).
 
-In case you want to use [Ninja](https://ninja-build.org/) or other development tools please install them separately. The instructions below are the minimum dependencies to build Vulkan Launchpad.
-
-#### Ubuntu and Linux Mint
 ```bash
-# Jammy Jellyfish (Ubuntu 22.04/22.10 and Linux Mint 21.0/21.1)
-# Add LunarG public key
-wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc
-# Add Vulkan package
-sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list http://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-# Focal Fossa (Ubuntu 20.04/20.10 and Linux Mint 20.0/20.1/20.2/20.3)
-# Add LunarG public key
-wget -qO - http://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
-# Add Vulkan package
-sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-focal.list http://packages.lunarg.com/vulkan/lunarg-vulkan-focal.list
-
-# Update package manager
-sudo apt update
-# Install dependencies
+# Debian/Ubuntu
 sudo apt install git cmake build-essential xorg-dev libvulkan-dev vulkan-headers vulkan-validationlayers
-```
 
-#### Fedora Workstation
-```bash
+# Fedora
 sudo dnf install cmake gcc-c++ libXinerama-devel vulkan-loader-devel vulkan-headers vulkan-validation-layers-devel
 sudo dnf -y groupinstall "X Software Development"
-```
 
-#### Manjaro
-```bash
+# Arch/Manjaro
 sudo pacman -Sy cmake base-devel vulkan-validation-layers
 ```
 
-## Editors and IDEs
+Then, from the repo root:
 
-### Visual Studio Code (VS Code)
-- Download and install [Visual Studio Code](https://code.visualstudio.com/download)!
-    - Select the option `Add "Open with Code" action to Widows Explorer directory context menu` for more convenience.
-- Install the following extensions (navigate to `View -> Extensions`):
-    - [CMake Tools](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cmake-tools) (which will also install the [CMake](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cmake-tools) extension)
-    - [C/C++](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools)
-    - _Recommended:_ [Shader languages support for VS Code](https://marketplace.visualstudio.com/items?itemName=slevesque.shader)
-    - Restart VS Code, or execute the comand `Developer: Reload Window`!
-- Open the folder containing the `CMakeLists.txt` file (the root folder of this repository)!
-    - This can be accomplished through `File -> Open Folder...`, you might also get the option to `Open with Code` from a folder's context menu in Windows Explorer.
-- Execute the following commands (either through `Show All Commands`, which can be activated by default via `Ctrl+Shift+P` or `Cmd+Shift+P` (macOS), or you'll also find buttons for these actions at the bottom of the VS Code window):
-    - `CMake: Select a Kit` then select, e.g., `Visual Studio Build Tools 2022 Release - amd64` (if you are using Windows and have installed the `Build Tools for Visual Studio 2022`).
-    - `CMake: Select Variant` and select `Debug` for a build with debug information, or `Release` for one without.
-    - The above command should also trigger CMake's configuration step. If it doesn't, execute `CMake: Configure`!
-    - `CMake: Build Target`, then select `VulkanLaunchpadStarter EXECUTABLE` to build Vulkan Launchpad Starter as an executable. Alternatively, just build everything by selecting `ALL_BUILD`.
-    - `CMake: Debug` to start debugging the the selected target (default shortcut: `Ctrl+F5`).
-    - `CMake: Run` to start debugging the the selected target (default shortcut: `Shift+F5`).
-	
-_Note:_ Vulkan Launchpad Starter comes with a `.vscode/settings.json` file which configures the current working directory to be the workspace root folder, which can be especially helpful when loading files from paths relative to the workspace root (like shader files). Furthermore, configures an external console window to be shown, which might allow to focus better on messages printed to the console.
-
-### Visual Studio 2022 Community
-- Download and install [Visual Studio Community 2022](https://visualstudio.microsoft.com/vs/community/), or a newer version.
-    - Select the `Desktop development with C++` workload in the installer!
-    - Should you encounter CMake-related problems, install one of the latest versions of CMake _after_ installing Visual Studio Community 2022 using the [Windows x64 Installer](https://cmake.org/download/).
-        - Ensure to select an option to `Add CMake to the system PATH ...` during installation!
-        - _Important:_ Ensure to get CMake version `3.22` or newer!
-- _Recommended:_ Install the [GLSL language integration](https://marketplace.visualstudio.com/items?itemName=DanielScherzer.GLSL2022) extension for syntax highlighting in shader files!
-    - _Hint:_ Go to `Tools -> Options -> GLSL language integration`. For Vulkan shader development, either set `Live compiling` to `False` (syntax highlighting only), or set the `External compiler executable file` to, e.g., the path to `glslangValidator.exe`!
-- Open the folder containing the `CMakeLists.txt` file (the root folder of this repository)!
-    - This can be accomplished through `File -> Open -> Folder...`, you might also get the option to `Open with Visual Studio` from a folder's context menu in Windows Explorer.
-    - You should be able to observe in the `Output` tab that CMake generation started.
-        - If not, check if the `Show output from:` combobox is set to the option `CMake`!
-        - Wait a bit until you see the message `CMake generation finished.`.
-    - Execute `Build -> Build All` (default shortcut: `Ctrl+Shift+B`) to build Vulkan Launchpad Starter as an executable (and also builds all the other targets).
-- To debug or run the executable, please select the `VulkanLaunchpadStarter.exe (in workspaceRoot)` item from the `Select Startup Item` combobox. `F5` starts debugging the selected item, `Ctrl+F5` runs the selected item without debugging.     
-    _Note:_ The difference to the `VulkanLaunchpadStarter.exe` item (i.e., without "`(in workspaceRoot)`") is that the suggested item `VulkanLaunchpadStarter.exe (in workspaceRoot)` configures the current working directory to be the workspace root folder, which can be especially helpful when loading files from paths relative to the workspace root (like shader files).      
-    This is configured via the `.vs/launch.vs.json` config file.
-
-### Xcode
-- Download and install [Xcode](https://apps.apple.com/us/app/xcode/id497799835) from the Mac App Store!
-- Generate the Xcode project files:
-  - Command line option:
-    - Open a terminal window at the workspace root directory. This can be done by right clicking the folder and selecting `New Terminal at Folder`.
-    - Option 1: Execute `make` from the terminal. This uses the included `makefile` located in the workspace root directory. Project files can be found in `_project` afterwards.
-    - Option 2: Execute `cmake -H. -B_project -G "Xcode" -DCMAKE_INSTALL_PREFIX="_install"` from the terminal.
-  - CMake Gui option:
-    - Open the CMake Gui and specify the workspace root directory as the source directory. Specify a folder into which the generated project files should be stored. Click `Configure`, select Xcode as the Generator and press `Done`. After completion, press `Generate`.
-- Open `VulkanLaunchpadStarter.xcodeproj` with Xcode. The file should be located in the folder into which the project files were generated.
-
-### Other IDEs
-Other IDEs (such as [CLion](https://www.jetbrains.com/clion/) or [Qt Creator](https://www.qt.io/product/development-tools)) are usable too as long as they support CMake. Please consider the following remarks for the setup process:
-- Make sure to set the working directory to the workspace directory.
+```bash
+cmake -S . -B build -G Ninja
+cmake --build build
+./build/VulkanLaunchpadStarter
+```
 
 ## Troubleshooting
 
-#### Submodule Updates Take a Long Time
-
-In case you experience problems concerning the submodule checkout, i.e. the cloning of the submodules (GLFW, GLM or glslang) takes a long time or seems to be stuck, please try the following approach:
-* Please clone the repo manually in a terminal in a new location using the following git commands:     
-    ```bash
-    git clone --recurse-submodules https://github.com/cg-tuwien/VulkanLaunchpadStarter.git
-    ```
-    
-#### On macOS: CMake cannot find C/CXX compiler
-
-In case you had an existing XCode Command Line Tools installation, this error may occur during cmake generation. You can try:
-    ```bash
-    xcode-select --reset
-    ```
-    
-#### On macOS: CMake cannot find Vulkan
-
-This may be the case, if you forgot to select `System Global Installation` during the Vulkan SDK installation, leading to errors during cmake generation, as the location of the Vulkan libraries cannot be found. You can install it retroactively by executing the `MaintenanceTool.app` in the `VulkanSDK` folder and selecting `System Global Installation` as a component to add.
-
-#### ERROR: No GLFW window created
-
-You have followed the setup instructions, you have built the executable, you run it and you receive an error message which says:
-```
-ERROR:   No GLFW window created.
+**Submodule checkout is slow or stuck.** Clone the repo manually instead of relying on CMake's
+auto-update:
+```bash
+git clone --recurse-submodules https://github.com/kimsis/FractalTerrainGenerator.git
 ```
 
-This is exactly what you should see if you haven't already implemented anything, but just built&run Vulkan Launchpad Starter as-is.         
-Look for `// TODO: ` comments in the code to get an idea what is requiried next in order to finish setup, like creating a GLFW window, creating a Vulkan instance, selecting a physical device, etc.
+**macOS: CMake cannot find a C/CXX compiler.** If you previously had another Xcode Command Line
+Tools installation, try `xcode-select --reset`.
 
-# Documentation
-
-Vulkan Launchpad Starter represents a project setup for an executable that links the [Vulkan Launchpad](https://github.com/cg-tuwien/VulkanLaunchpad) framework. Therefore, all of Vulkan Launchpad's functionality is provided here. Please have a look at Vulkan Launchpad's [Documentation](https://github.com/cg-tuwien/VulkanLaunchpad#documentation) to get an overview of its functionality!
-
-Vulkan Launchpad Starter adds the following functionality:
-
-**Vulkan Helpers:**      
-- `struct HlpGeometryHandles`: Struct intended for storing a bunch of geometry buffers.
-- `hlpIsInstanceExtensionSupported`: Test if a given extension is supported by the Vulkan instance.
-- `hlpIsInstanceLayerSupported`: Test if a given layer is supported by the Vulkan instance.
-- `hlpSelectPhysicalDeviceIndex`: Select a physical device index that supports graphics and presentation.
-- `hlpGetPhysicalDeviceSurfaceCapabilities`: Gets a given physical device's surface capabilities.
-- `hlpGetSurfaceImageFormat`: Get a suitable image format for a surface.
-- `hlpGetSurfaceTransform`: Get a surface's current transform.
-- `hlpRecordPipelineBarrierWithImageLayoutTransition`: Record a pipeline barrier with some default parameter and an image layout transition into a command buffer.
-- `hlpRecordCopyBufferToImage`: Copy a buffer's contents into the first mip level and first layer of an image.
-- `hlpCreateImageView`: Creates a `VkImageView` for the first mip level and first layer of a `VkImage`.
-- `hlpDestroyImageView`: Corresponding :point_up_2: destruction function.
-- `hlpCreateSampler`: Create a `VkSampler` with some default parameters.
-- `hlpDestroySampler`: Corresponding :point_up_2: destruction function.
-
-**Teapot Functionality:**    
-- `teapotCreateGeometryAndBuffers`: Create the geometry of a teapot model and stores it internally.
-- `teapotDestroyBuffers`: Corresponding :point_up_2: destruction function.
-- `teapotDraw`: Draws a teapot into the (Vulkan Launchpad-internally handled) current command buffer. 
-    There are multiple overloads:
-    - One that takes no parameters
-    - One that takes a custom `VkPipeline` and uses that for drawing.
-    - One that takes a custom `VkPipeline` and a `VkDescriptorSet` as parameters. The `VkDescriptorSet` is bound before the teapot is drawn with the `VkPipeline`.
-- `teapotGetPositionsBuffer`: Gets a `VkBuffer` handle containing the teapot's positions.
-- `teapotGetIndicesBuffer`: Gets a `VkBuffer` handle containing the teapot's indices.
-- `teapotGetNumIndices`: Gets the number of indices contained in the buffer returned by :point_up_2: `teapotGetIndicesBuffer`.
+**macOS: CMake cannot find Vulkan.** This usually means the Vulkan SDK wasn't installed with
+**System Global Installation** ticked. Re-run the SDK's `MaintenanceTool.app` and add that
+component.
