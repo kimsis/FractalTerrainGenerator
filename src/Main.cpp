@@ -1751,8 +1751,10 @@ void drawGeometryWithMaterial(
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u, &material, 0u, nullptr);
 
     vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    VkBuffer vertex_buffers[4] = {geometry_from.positionsBuffer, geometry_to.positionsBuffer, geometry_from.normalsBuffer, geometry_to.normalsBuffer};
-    VkDeviceSize offsets[4] = {0, 0, 0, 0};
+    // Positions and normals now share one combined buffer per Geometry (see Geometry::vertexBuffer)
+    // — the same VkBuffer is bound twice here, once per offset, which Vulkan allows.
+    VkBuffer vertex_buffers[4] = {geometry_from.vertexBuffer, geometry_to.vertexBuffer, geometry_from.vertexBuffer, geometry_to.vertexBuffer};
+    VkDeviceSize offsets[4] = {0, 0, geometry_from.normalsOffset, geometry_to.normalsOffset};
     vkCmdBindVertexBuffers(cb, 0u, 4u, vertex_buffers, offsets);
 
     vkCmdBindIndexBuffer(cb, geometry_to.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
@@ -1899,7 +1901,7 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
     // the vertex/index buffers and the push-constant blend state differ per chunk.
     for (auto& entry : scene.chunkManager.loadedChunks) {
         const LoadedChunk& chunk = entry.second;
-        bool is_blending = chunk.from.positionsBuffer != VK_NULL_HANDLE;
+        bool is_blending = chunk.from.vertexBuffer != VK_NULL_HANDLE;
         float blend_factor =
             is_blending ? glm::clamp(static_cast<float>((currentTime - chunk.blendStartTime) / scene.chunkManager.blendDuration), 0.0f, 1.0f) : 1.0f;
 

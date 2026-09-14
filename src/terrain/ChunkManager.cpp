@@ -26,7 +26,7 @@ static std::vector<float> sampleRow(const GeometryData& data, int size, int loca
 // True if `geometry`'s buffers are real, not the all-VK_NULL_HANDLE state a LoadedChunk's `from`
 // sits in whenever that chunk isn't currently blending.
 static bool isValidGeometry(const Geometry& geometry) {
-    return geometry.positionsBuffer != VK_NULL_HANDLE;
+    return geometry.vertexBuffer != VK_NULL_HANDLE;
 }
 
 // A chunk's index buffer is created once, on its first upload, and then shared for the chunk's

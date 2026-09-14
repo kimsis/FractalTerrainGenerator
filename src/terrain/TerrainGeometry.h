@@ -35,13 +35,20 @@ struct GeometryData {
  *	can be used for an indexed-geometry draw call.
  */
 struct Geometry {
-    // A handle to a GPU buffer that contains vertex position data.
-    VkBuffer positionsBuffer;
+    // A handle to a single GPU buffer holding BOTH vertex positions (at byte offset 0) and vertex
+    // normals (at byte offset normalsOffset) — combined into one allocation so a Hurst/reseed
+    // regeneration costs one vkCreateBuffer/vkAllocateMemory call instead of two (see
+    // createAndUploadIntoGpuMemory). Bound twice in the draw call (once per offset) as separate
+    // vertex-input bindings.
+    VkBuffer vertexBuffer;
 
-    // A handle to a GPU buffer that contains vertex normal data.
-    VkBuffer normalsBuffer;
+    // Byte offset into vertexBuffer where normal data begins.
+    VkDeviceSize normalsOffset;
 
-    // A handle to a GPU buffer that contains face indices data.
+    // A handle to a GPU buffer that contains face indices data. Kept as its own separate
+    // allocation (not folded into vertexBuffer) because, unlike positions/normals, it's invariant
+    // across a chunk's regenerations and is reused rather than recreated — see
+    // createAndUploadIntoGpuMemory's `upload_indices` parameter.
     VkBuffer indicesBuffer;
 
     // The total number of indices contained within the indicesBuffer.
@@ -62,6 +69,8 @@ GeometryData generateTerrainGeometry(const TerrainParams& params);
  * freeGpuMemory(...)!
  *
  * @param	geometry_data	The CPU-side geometry that shall be transferred into GPU-side buffers.
+ *							Its positions and normals are combined into a single `vertexBuffer`
+ *							allocation (see Geometry).
  * @param	upload_indices	If false, skips creating/uploading the index buffer entirely — the
  *							returned Geometry's `indicesBuffer` is VK_NULL_HANDLE and
  *							`numberOfIndices` is 0, for the caller to fill in from an existing
@@ -80,9 +89,10 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data, bool up
 void destroyGeometryGpuMemory(const Geometry& geometry);
 
 /*!
- *	Overwrites an already-uploaded Geometry's normals buffer in place, leaving positions/indices
- *	untouched. Used to patch previously-extrapolated edge normals once a neighboring chunk's real
- *	data becomes available (see ChunkManager) — a chunk's positions/indices never change after
- *	generation, so only its normals ever need updating post-upload.
+ *	Overwrites an already-uploaded Geometry's normals region (within its combined vertexBuffer,
+ *	at normalsOffset) in place, leaving positions/indices untouched. Used to patch previously-
+ *	extrapolated edge normals once a neighboring chunk's real data becomes available (see
+ *	ChunkManager) — a chunk's positions/indices never change after generation, so only its
+ *	normals ever need updating post-upload.
  */
 void updateGeometryNormals(const Geometry& geometry, const std::vector<glm::vec3>& normals);

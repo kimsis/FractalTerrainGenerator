@@ -13,6 +13,17 @@
 
 #include "DiamondSquareGenerator.h"
 
+// Positions and normals share one buffer (see Geometry::vertexBuffer); normals start at this
+// byte-aligned offset past the positions region. 16 bytes comfortably covers any reasonable
+// vertex-attribute format without relying on a driver-specific minimum vertex-buffer-offset
+// alignment (the core Vulkan spec places no explicit alignment requirement on vkCmdBindVertexBuffers
+// offsets, unlike e.g. uniform/storage buffers).
+static constexpr VkDeviceSize kVertexSubBufferAlignment = 16;
+
+static VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) {
+    return (value + alignment - 1) / alignment * alignment;
+}
+
 // Phase 1 of terrain generation: heights + positions + indices only, no normals. This is the part
 // that's fully independent between chunks — a pure function of (seed, global coords, level) — so
 // it can run on a background thread with zero cross-chunk communication. Normals are derived in a
@@ -37,21 +48,23 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data, bool up
 
     Geometry result;
 
-    // Create vertex positions from buffer and copy data into it:
+    // Positions and normals combined into one buffer/allocation — positions at offset 0, normals
+    // right after (aligned) — so this costs one vkCreateBuffer/vkAllocateMemory call instead of
+    // two. This is the pair that gets recreated on every Hurst/reseed regeneration (unlike
+    // indices, below), so halving its allocation count directly halves the regeneration-time
+    // GPU-call overhead that was still causing a stutter after indices were made reusable.
     size_t positions_buffer_byte_size = geometry_data.positions.size() * sizeof(geometry_data.positions[0]);
-    result.positionsBuffer = vklCreateHostCoherentBufferAndUploadData(
-        static_cast<const void*>(geometry_data.positions.data()),
-        positions_buffer_byte_size,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-    );
-
-    // Create vertex normals from buffer and copy data into it:
     size_t normals_buffer_byte_size = geometry_data.normals.size() * sizeof(geometry_data.normals[0]);
-    result.normalsBuffer = vklCreateHostCoherentBufferAndUploadData(
-        geometry_data.normals.data(),
-        normals_buffer_byte_size,
+    VkDeviceSize normals_offset = alignUp(static_cast<VkDeviceSize>(positions_buffer_byte_size), kVertexSubBufferAlignment);
+    VkDeviceSize vertex_buffer_byte_size = normals_offset + static_cast<VkDeviceSize>(normals_buffer_byte_size);
+
+    result.vertexBuffer = vklCreateHostCoherentBufferWithBackingMemory(
+        vertex_buffer_byte_size,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
     );
+    vklCopyDataIntoHostCoherentBuffer(result.vertexBuffer, 0, geometry_data.positions.data(), positions_buffer_byte_size);
+    vklCopyDataIntoHostCoherentBuffer(result.vertexBuffer, normals_offset, geometry_data.normals.data(), normals_buffer_byte_size);
+    result.normalsOffset = normals_offset;
 
     if (upload_indices) {
         // Create indices buffer and copy data into it:
@@ -80,14 +93,11 @@ void destroyGeometryGpuMemory(const Geometry& geometry) {
     if (geometry.indicesBuffer != VK_NULL_HANDLE) {
         vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.indicesBuffer);
     }
-    if (geometry.positionsBuffer != VK_NULL_HANDLE) {
-        vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.positionsBuffer);
-    }
-    if (geometry.normalsBuffer != VK_NULL_HANDLE) {
-        vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.normalsBuffer);
+    if (geometry.vertexBuffer != VK_NULL_HANDLE) {
+        vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.vertexBuffer);
     }
 }
 
 void updateGeometryNormals(const Geometry& geometry, const std::vector<glm::vec3>& normals) {
-    vklCopyDataIntoHostCoherentBuffer(geometry.normalsBuffer, normals.data(), normals.size() * sizeof(normals[0]));
+    vklCopyDataIntoHostCoherentBuffer(geometry.vertexBuffer, geometry.normalsOffset, normals.data(), normals.size() * sizeof(normals[0]));
 }
