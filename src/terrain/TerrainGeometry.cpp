@@ -71,3 +71,7 @@ void destroyGeometryGpuMemory(const Geometry& geometry) {
     vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.positionsBuffer);
     vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.normalsBuffer);
 }
+
+void updateGeometryNormals(const Geometry& geometry, const std::vector<glm::vec3>& normals) {
+    vklCopyDataIntoHostCoherentBuffer(geometry.normalsBuffer, normals.data(), normals.size() * sizeof(normals[0]));
+}

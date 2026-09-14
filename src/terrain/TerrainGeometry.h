@@ -70,3 +70,11 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data);
  *	Frees the GPU buffers that have been created via createAndUploadIntoGpuMemory.
  */
 void destroyGeometryGpuMemory(const Geometry& geometry);
+
+/*!
+ *	Overwrites an already-uploaded Geometry's normals buffer in place, leaving positions/indices
+ *	untouched. Used to patch previously-extrapolated edge normals once a neighboring chunk's real
+ *	data becomes available (see ChunkManager) — a chunk's positions/indices never change after
+ *	generation, so only its normals ever need updating post-upload.
+ */
+void updateGeometryNormals(const Geometry& geometry, const std::vector<glm::vec3>& normals);

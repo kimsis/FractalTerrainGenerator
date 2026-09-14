@@ -9,6 +9,14 @@
 #include "DiamondSquareGenerator.h"
 #include "TerrainGeometry.h"
 
+// Bits into LoadedChunk::missingNeighborMask, one per cardinal direction.
+enum NeighborBit : uint8_t {
+    kNeighborLeft = 1u << 0,
+    kNeighborRight = 1u << 1,
+    kNeighborTop = 1u << 2,
+    kNeighborBottom = 1u << 3,
+};
+
 /*!
  *	One loaded chunk's GPU geometry, with an optional in-progress blend from an earlier Hurst/seed
  *	value (`from`, valid only while blending) to its current one (`to`, always valid once loaded).
@@ -17,6 +25,12 @@ struct LoadedChunk {
     Geometry from;
     Geometry to;
     double blendStartTime;
+
+    // Which of this chunk's neighbors (see NeighborBit) were missing — outside the loaded window,
+    // not merely still generating — the last time `to`'s normals were computed, and so had that edge
+    // extrapolated instead of using real neighbor data. Cleared bit-by-bit as updateLoadedChunks
+    // notices a previously-missing neighbor has since loaded and patches that edge in.
+    uint8_t missingNeighborMask = 0;
 };
 
 /*!
@@ -82,6 +96,17 @@ struct ChunkManager {
     // Phase 2 (normal derivation) in flight.
     std::unordered_map<ChunkCoord, std::future<std::vector<glm::vec3>>> pendingNormals;
 
+    // Parallel to pendingNormals: the missingNeighborMask each dispatch in there was computed with,
+    // carried through so it can be stored on the LoadedChunk once that upload completes.
+    std::unordered_map<ChunkCoord, uint8_t> pendingNormalsMask;
+
+    // Re-derivation of an already-loaded chunk's normals, for a chunk whose missingNeighborMask
+    // indicated a real neighbor has since become available. Separate from pendingNormals since this
+    // patches an existing chunk in place (see updateGeometryNormals) rather than producing a new
+    // upload, and — unlike pendingNormals — being in flight here doesn't count as isRegenerating():
+    // it's a background refinement of stable geometry, not a Hurst/reseed change in progress.
+    std::unordered_map<ChunkCoord, std::future<std::vector<glm::vec3>>> pendingRenormals;
+
     // Geometry evicted or retired from a finished blend, not yet actually freed. See PendingDestroy.
     std::vector<PendingDestroy> pendingDestroys;
 };
@@ -91,7 +116,10 @@ struct ChunkManager {
  *	anything more than (viewRadius + 1) chunks away. Uploads at most `maxUploadsPerFrame` newly-loaded
  *	chunks per call (regeneration uploads are uncapped). An evicted chunk or a finished blend's `from`
  *	is queued in `pendingDestroys` rather than freed immediately (see that struct's doc for why); up
- *	to `maxDestroysPerFrame` eligible entries are actually freed per call.
+ *	to `maxDestroysPerFrame` eligible entries are actually freed per call. Also revisits any loaded
+ *	chunk whose `missingNeighborMask` is nonzero: once a previously-missing neighbor has real data,
+ *	that chunk's normals are re-derived in the background and its normals buffer patched in place
+ *	once ready (see LoadedChunk::missingNeighborMask and pendingRenormals).
  *
  *	`currentTime` should be the same clock used when drawing (glfwGetTime()).
  */
@@ -109,7 +137,8 @@ void invalidateAllLoadedChunks(ChunkManager& manager);
 
 /*!
  *	True while any chunk is still mid-generation or mid-blend. Callers should refuse a new
- *	Hurst/reseed change while this is true.
+ *	Hurst/reseed change while this is true. Deliberately ignores `pendingRenormals` — a background
+ *	edge-normal touch-up on already-stable geometry, not a Hurst/reseed change in progress.
  */
 bool isRegenerating(const ChunkManager& manager);
 
