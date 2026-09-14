@@ -47,13 +47,16 @@ constexpr float CORNELL_KD = 0.9f;
 constexpr float CORNELL_KS = 0.3f;
 constexpr float CORNELL_ALPHA = 10.0f;
 
-// Height-based terrain color gradient (brown dirt in valleys/underwater -> green grass -> grey
-// rock on peaks). Offsets are in the same unscaled world units as waterLevel (both get multiplied
-// by heightScale below), so the gradient stays anchored to the water level and scales along with
-// the height exaggeration slider instead of using fixed, easily-wrong-looking world heights.
+// Height-based terrain color gradient (dirt -> grass -> rock), in world units above waterLevel.
+// Compares directly against final rendered height, so it doesn't stretch with heightScale.
 constexpr float DIRT_TO_GRASS_HEIGHT_OFFSET = 3.0f;
 constexpr float GRASS_TO_ROCK_HEIGHT_OFFSET = 10.0f;
 constexpr float HEIGHT_COLOR_TRANSITION_BAND = 2.0f;
+
+// Small upward nudge on the water plane's Z, avoiding z-fighting with near-shore terrain (this
+// framework forces depth test/write on for every pipeline, water's included, with no way to disable
+// it). Small enough to be visually unnoticeable as a change in water level.
+constexpr float WATER_DEPTH_BIAS = 0.05f;
 
 constexpr size_t POLYMODES = 2;
 constexpr size_t CULLMODES = 3;
@@ -203,34 +206,24 @@ struct UniformBufferFrag {
      *	First three are material coefficients, the last one is specular alpha. */
     glm::vec4 materialProperties;
 
-    /*! Debug visualization toggles, each triggered by its own key: x = drawNormals (N), y =
-     *	highlightChunkBorders (F3). Grouped together since both are simple on/off overlays in
-     *	terrain.frag; unrelated to isUnderwater below, which reflects actual camera state. */
+    /*! Debug visualization toggles: x = drawNormals (N), y = highlightChunkBorders (F3). */
     glm::uvec2 debugToggles;
 
-    /*! Whether the camera is currently below the water plane; drives the underwater tint in
-     *  terrain.frag. A 4-byte type, not a native bool, for the same std140 reason as debugToggles. */
+    /*! Whether the camera is below the water plane; drives the underwater tint in terrain.frag. */
     uint32_t isUnderwater;
 
-    /*! World-space width of one terrain chunk ((gridSize - 1) * spacing), used by terrain.frag to
-     *	find how close a fragment's world position is to a chunk boundary. */
+    /*! World-space width of one terrain chunk, for the chunk-border-highlight distance check. */
     float chunkWidth;
 
-    /*! GUI-adjustable surface roughness in [0, 1]: 0 keeps the original sharp/shiny specular
-     *	highlight, 1 broadens and dims it to a matte look. Introduced because the terrain's high
-     *	triangle-to-triangle normal variance made small, disconnected specular highlights ("stars")
-     *	visible along triangle edges at the original fixed specular exponent/intensity. */
+    /*! Surface roughness in [0, 1]: 0 is sharp/shiny, 1 is broad/matte. See buildGUI's slider. */
     float roughness;
 
-    /*! World-space heights, deliberately *not* scaled by heightScale (unlike isUnderwater's
-     *	comparison), where terrain.frag's height-based color gradient transitions from dirt to grass,
-     *	and from grass to rock — so raising the height-exaggeration slider actually exposes more rock
-     *	at peaks instead of the color bands silently stretching to compensate. See
-     *	DIRT_TO_GRASS_HEIGHT_OFFSET/GRASS_TO_ROCK_HEIGHT_OFFSET. */
+    /*! World-space heights (not scaled by heightScale) where the height-based color gradient
+     *	transitions dirt->grass and grass->rock. See DIRT_TO_GRASS_HEIGHT_OFFSET/GRASS_TO_ROCK_HEIGHT_OFFSET. */
     float dirtToGrassHeight;
     float grassToRockHeight;
 
-    /*! Half-width, in the same (unscaled) world units, of each of the two color transitions above. */
+    /*! Half-width of each color transition above, same units as dirtToGrassHeight. */
     float heightColorTransitionBand;
 };
 
@@ -1791,9 +1784,7 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
     TerrainScene scene{};
     scene.heightScale = 1.0f;
     scene.roughness = 0.6f;
-    // DIRT_TO_GRASS_HEIGHT_OFFSET (3.0) minus 1 unit of margin: without the margin, the dirt/grass
-    // color transition's lower half (heightColorTransitionBand extends below the threshold) would
-    // sit right at or above the water line, showing grass poking through just-submerged terrain.
+    // 1 unit below DIRT_TO_GRASS_HEIGHT_OFFSET, so the dirt/grass transition doesn't poke above water.
     scene.waterLevel = DIRT_TO_GRASS_HEIGHT_OFFSET - 1.0f;
     scene.chunkManager.baseParams = params;
     scene.chunkManager.viewRadius = g_chunk_view_radius;
@@ -2014,7 +2005,8 @@ void updateWaterChunks(VkDevice vk_device, WaterScene& scene, const ChunkManager
 
 void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scene, const Camera* camera) {
     UniformBufferWaterVert ub_data;
-    ub_data.modelMatrix = glm::translate(glm::mat4{1.0f}, glm::vec3(0.0f, 0.0f, terrain_scene.waterLevel * terrain_scene.heightScale));
+    ub_data.modelMatrix =
+        glm::translate(glm::mat4{1.0f}, glm::vec3(0.0f, 0.0f, terrain_scene.waterLevel * terrain_scene.heightScale + WATER_DEPTH_BIAS));
     ub_data.viewProjMatrix = camera->getViewProjectionMatrix();
     vklCopyDataIntoHostCoherentBuffer(scene.ub_water_vert, &ub_data, sizeof(UniformBufferWaterVert));
 
@@ -2132,7 +2124,7 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     ImGui::EndDisabled();
 
     labelThenRightAlignedWidget("Height Scale", kSliderWidth);
-    ImGui::SliderFloat("##heightScale", &scene.heightScale, 0.000001f, 5.0f, "%f", flags_for_sliders);
+    ImGui::SliderFloat("##heightScale", &scene.heightScale, 0.1f, 5.0f, "%f", flags_for_sliders);
 
     labelThenRightAlignedWidget("Roughness", kSliderWidth);
     ImGui::SliderFloat("##roughness", &scene.roughness, 0.0f, 1.0f, "%f", flags_for_sliders);
