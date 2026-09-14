@@ -180,10 +180,10 @@ struct UniformBufferVert {
  *	frame's draws.
  */
 struct TerrainPushConstants {
-    /*! 0-1 float for the smooth transition between hurst/seed changes */
+    /*! 0-1 blend progress between this chunk's `from` and `to` geometry. */
     float blendFactor;
 
-    /*! isBlend toggle, to avoid degenerate mixing of the same geometry in shaders. */
+    /*! Whether this chunk is currently blending (`from` is valid). */
     uint32_t isBlending;
 };
 
