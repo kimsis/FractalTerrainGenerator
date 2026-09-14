@@ -1037,7 +1037,7 @@ int main(int argc, char** argv) {
             g_chunk_view_radius_changed = false;
             terrain_scene.chunkManager.viewRadius = g_chunk_view_radius;
         }
-        updateLoadedChunks(vk_device, terrain_scene.chunkManager, activeCamera->getPosition(), currentFrameTime);
+        updateLoadedChunks(terrain_scene.chunkManager, activeCamera->getPosition(), currentFrameTime);
         updateWaterChunks(vk_device, water_scene, terrain_scene.chunkManager);
         {
             static size_t last_loaded = SIZE_MAX;
@@ -2019,7 +2019,7 @@ static size_t chunksStillGenerating(const ChunkManager& chunkManager) {
 }
 
 void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& chunkManager, const glm::vec3& cameraPos) {
-    updateLoadedChunks(vk_device, chunkManager, cameraPos, glfwGetTime());
+    updateLoadedChunks(chunkManager, cameraPos, glfwGetTime());
     while (chunksStillGenerating(chunkManager) > 0) {
         glfwPollEvents();
 
@@ -2035,7 +2035,7 @@ void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& 
         vklEndRecordingCommands();
         vklPresentCurrentSwapchainImage();
 
-        updateLoadedChunks(vk_device, chunkManager, cameraPos, glfwGetTime());
+        updateLoadedChunks(chunkManager, cameraPos, glfwGetTime());
     }
 }
 

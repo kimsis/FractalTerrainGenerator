@@ -29,7 +29,12 @@ static bool isValidGeometry(const Geometry& geometry) {
     return geometry.positionsBuffer != VK_NULL_HANDLE;
 }
 
-void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::vec3& cameraPos, double currentTime) {
+// How many updateLoadedChunks calls a PendingDestroy waits before it's actually freed. One call
+// would already be provably safe (see PendingDestroy's doc), but two gives a small margin in case
+// VulkanLaunchpad.cpp's CONCURRENT_FRAMES ever changes from its current value of 1.
+static constexpr int kDestroyDeferralCalls = 2;
+
+void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, double currentTime) {
     ChunkCoord center = cameraToChunkCoord(cameraPos, manager.baseParams);
     int destroyRadius = manager.viewRadius + 1;
     int size = (1 << manager.baseParams.gridSizeExponent) + 1;
@@ -111,19 +116,26 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
         it = manager.readyForNormals.erase(it);
     }
 
-    // Batches every GPU destroy this call into at most one vkDeviceWaitIdle.
-    bool destroyed_any = false;
-
     // 4. Drain phase-2 results and upload to the GPU, if still in range. If this coordinate was
     // already loaded, it's a regeneration: snap its current `to` to be the new `from` and start a
-    // fresh blend from `currentTime`.
+    // fresh blend from `currentTime` — regeneration uploads are uncapped (see maxUploadsPerFrame).
+    // A brand-new chunk (never loaded before) is capped at maxUploadsPerFrame per call instead, since
+    // travelling can bring a whole ring of new chunks into range at once; a ready one past the cap is
+    // left queued in `pendingNormals` (peeked via wait_for, not consumed) for a later call.
+    int uploaded_this_frame = 0;
     for (auto it = manager.pendingNormals.begin(); it != manager.pendingNormals.end();) {
         if (it->second.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
             ++it;
             continue;
         }
+        bool inRange = isWithinViewRadius(it->first, center, destroyRadius) && manager.chunkData.count(it->first);
+        bool isNewChunk = inRange && !manager.loadedChunks.count(it->first);
+        if (isNewChunk && uploaded_this_frame >= manager.maxUploadsPerFrame) {
+            ++it;
+            continue;
+        }
         std::vector<glm::vec3> normals = it->second.get();
-        if (isWithinViewRadius(it->first, center, destroyRadius) && manager.chunkData.count(it->first)) {
+        if (inRange) {
             GeometryData data = manager.chunkData[it->first];
             data.normals = std::move(normals);
             Geometry newGeometry = createAndUploadIntoGpuMemory(data);
@@ -131,6 +143,7 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
             auto existing = manager.loadedChunks.find(it->first);
             if (existing == manager.loadedChunks.end()) {
                 manager.loadedChunks[it->first] = LoadedChunk{Geometry{}, newGeometry, 0.0};
+                uploaded_this_frame++;
             } else {
                 existing->second.from = existing->second.to;
                 existing->second.to = newGeometry;
@@ -141,25 +154,20 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
     }
 
     // 5-6. One pass over loadedChunks: evict anything that's fallen more than (viewRadius + 1)
-    // chunks away, else destroy the now-unused `from` of any chunk whose blend has finished.
+    // chunks away, else clear the now-unused `from` of any chunk whose blend has finished. Both cases
+    // just queue the freed Geometry in pendingDestroys (see PendingDestroy) rather than destroy it
+    // outright, so this pass is cheap bookkeeping regardless of how many chunks a single chunk-border
+    // crossing or mass regeneration affects at once — the real GPU cost is paid gradually below.
     for (auto it = manager.loadedChunks.begin(); it != manager.loadedChunks.end();) {
         LoadedChunk& chunk = it->second;
         if (!isWithinViewRadius(it->first, center, destroyRadius)) {
-            if (!destroyed_any) {
-                vkDeviceWaitIdle(vk_device);
-                destroyed_any = true;
-            }
-            if (isValidGeometry(chunk.from)) destroyGeometryGpuMemory(chunk.from);
-            destroyGeometryGpuMemory(chunk.to);
+            if (isValidGeometry(chunk.from)) manager.pendingDestroys.push_back({chunk.from, kDestroyDeferralCalls});
+            manager.pendingDestroys.push_back({chunk.to, kDestroyDeferralCalls});
             it = manager.loadedChunks.erase(it);
             continue;
         }
         if (isValidGeometry(chunk.from) && currentTime - chunk.blendStartTime >= manager.blendDuration) {
-            if (!destroyed_any) {
-                vkDeviceWaitIdle(vk_device);
-                destroyed_any = true;
-            }
-            destroyGeometryGpuMemory(chunk.from);
+            manager.pendingDestroys.push_back({chunk.from, kDestroyDeferralCalls});
             chunk.from = Geometry{};
         }
         ++it;
@@ -171,6 +179,21 @@ void updateLoadedChunks(VkDevice vk_device, ChunkManager& manager, const glm::ve
         } else {
             ++it;
         }
+    }
+
+    // Actually free up to maxDestroysPerFrame pendingDestroys entries whose deferral has elapsed —
+    // the only place real GPU destroy calls happen, so this is what caps how much of that cost lands
+    // in any one call, regardless of how many chunks became eligible for destruction above.
+    int destroyed_this_frame = 0;
+    for (auto it = manager.pendingDestroys.begin(); it != manager.pendingDestroys.end();) {
+        it->callsRemaining--;
+        if (it->callsRemaining > 0 || destroyed_this_frame >= manager.maxDestroysPerFrame) {
+            ++it;
+            continue;
+        }
+        destroyGeometryGpuMemory(it->geometry);
+        destroyed_this_frame++;
+        it = manager.pendingDestroys.erase(it);
     }
 }
 
@@ -194,4 +217,8 @@ void cleanupChunkManager(ChunkManager& manager) {
         destroyGeometryGpuMemory(entry.second.to);
     }
     manager.loadedChunks.clear();
+    for (auto& pending : manager.pendingDestroys) {
+        destroyGeometryGpuMemory(pending.geometry);
+    }
+    manager.pendingDestroys.clear();
 }
