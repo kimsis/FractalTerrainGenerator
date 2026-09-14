@@ -29,6 +29,17 @@ static bool isValidGeometry(const Geometry& geometry) {
     return geometry.positionsBuffer != VK_NULL_HANDLE;
 }
 
+// A chunk's index buffer is created once, on its first upload, and then shared for the chunk's
+// entire lifetime across every later Hurst/reseed regeneration (see step 4) — `to.indicesBuffer`
+// is always that one persistent handle, and whenever `from` is valid it's always the very same
+// handle too, not a separate copy. Queueing/destroying a `from` must therefore never take its
+// indices buffer down with it, or the `to` that still depends on it would be left dangling.
+static Geometry withoutIndices(Geometry geometry) {
+    geometry.indicesBuffer = VK_NULL_HANDLE;
+    geometry.numberOfIndices = 0;
+    return geometry;
+}
+
 // Which of coord's 4 neighbors currently have no chunkData (see LoadedChunk::missingNeighborMask).
 static uint8_t missingNeighborMaskFor(const ChunkManager& manager, const ChunkCoord& coord) {
     uint8_t mask = 0;
@@ -159,13 +170,20 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
         if (inRange) {
             GeometryData data = manager.chunkData[it->first];
             data.normals = std::move(normals);
-            Geometry newGeometry = createAndUploadIntoGpuMemory(data);
 
             auto existing = manager.loadedChunks.find(it->first);
             if (existing == manager.loadedChunks.end()) {
+                Geometry newGeometry = createAndUploadIntoGpuMemory(data);
                 manager.loadedChunks[it->first] = LoadedChunk{Geometry{}, newGeometry, 0.0, missingMask};
                 uploaded_this_frame++;
             } else {
+                // Regeneration: this chunk's topology (indices) never changes across a Hurst/reseed
+                // change, so reuse its existing index buffer instead of paying for another GPU
+                // allocation (see TerrainGeometry.h's upload_indices parameter) — cuts the per-chunk
+                // regeneration cost from 3 buffer allocations down to 2.
+                Geometry newGeometry = createAndUploadIntoGpuMemory(data, /*upload_indices=*/false);
+                newGeometry.indicesBuffer = existing->second.to.indicesBuffer;
+                newGeometry.numberOfIndices = existing->second.to.numberOfIndices;
                 existing->second.from = existing->second.to;
                 existing->second.to = newGeometry;
                 existing->second.blendStartTime = currentTime;
@@ -227,13 +245,13 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
     for (auto it = manager.loadedChunks.begin(); it != manager.loadedChunks.end();) {
         LoadedChunk& chunk = it->second;
         if (!isWithinViewRadius(it->first, center, destroyRadius)) {
-            if (isValidGeometry(chunk.from)) manager.pendingDestroys.push_back({chunk.from, kDestroyDeferralCalls});
+            if (isValidGeometry(chunk.from)) manager.pendingDestroys.push_back({withoutIndices(chunk.from), kDestroyDeferralCalls});
             manager.pendingDestroys.push_back({chunk.to, kDestroyDeferralCalls});
             it = manager.loadedChunks.erase(it);
             continue;
         }
         if (isValidGeometry(chunk.from) && currentTime - chunk.blendStartTime >= manager.blendDuration) {
-            manager.pendingDestroys.push_back({chunk.from, kDestroyDeferralCalls});
+            manager.pendingDestroys.push_back({withoutIndices(chunk.from), kDestroyDeferralCalls});
             chunk.from = Geometry{};
         }
         ++it;
@@ -279,7 +297,7 @@ bool isRegenerating(const ChunkManager& manager) {
 
 void cleanupChunkManager(ChunkManager& manager) {
     for (auto& entry : manager.loadedChunks) {
-        if (isValidGeometry(entry.second.from)) destroyGeometryGpuMemory(entry.second.from);
+        if (isValidGeometry(entry.second.from)) destroyGeometryGpuMemory(withoutIndices(entry.second.from));
         destroyGeometryGpuMemory(entry.second.to);
     }
     manager.loadedChunks.clear();

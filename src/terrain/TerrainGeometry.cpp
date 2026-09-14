@@ -27,11 +27,11 @@ GeometryData generateTerrainGeometry(const TerrainParams& params) {
     return data;
 }
 
-Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data) {
+Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data, bool upload_indices) {
     if (geometry_data.positions.empty()) {
         VKL_EXIT_WITH_ERROR("An empty GeometryData::positions vector has been passed to createAndUploadIntoGpuMemory(...)");
     }
-    if (geometry_data.indices.empty()) {
+    if (upload_indices && geometry_data.indices.empty()) {
         VKL_EXIT_WITH_ERROR("An empty GeometryData::indices vector has been passed to createAndUploadIntoGpuMemory(...)");
     }
 
@@ -53,23 +53,39 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data) {
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
     );
 
-    // Create indices buffer and copy data into it:
-    size_t indices_buffer_byte_size = geometry_data.indices.size() * sizeof(geometry_data.indices[0]);
-    result.indicesBuffer = vklCreateHostCoherentBufferAndUploadData(
-        geometry_data.indices.data(),
-        static_cast<VkDeviceSize>(indices_buffer_byte_size),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT
-    );
-    // Also store the number of indices:
-    result.numberOfIndices = static_cast<uint32_t>(geometry_data.indices.size());
+    if (upload_indices) {
+        // Create indices buffer and copy data into it:
+        size_t indices_buffer_byte_size = geometry_data.indices.size() * sizeof(geometry_data.indices[0]);
+        result.indicesBuffer = vklCreateHostCoherentBufferAndUploadData(
+            geometry_data.indices.data(),
+            static_cast<VkDeviceSize>(indices_buffer_byte_size),
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+        );
+        // Also store the number of indices:
+        result.numberOfIndices = static_cast<uint32_t>(geometry_data.indices.size());
+    } else {
+        // Caller already owns a still-valid index buffer for this chunk (topology never changes
+        // across a Hurst/reseed regeneration) and will fill these fields in themselves.
+        result.indicesBuffer = VK_NULL_HANDLE;
+        result.numberOfIndices = 0;
+    }
 
     return result;
 }
 
 void destroyGeometryGpuMemory(const Geometry& geometry) {
-    vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.indicesBuffer);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.positionsBuffer);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.normalsBuffer);
+    // A VK_NULL_HANDLE field means this Geometry doesn't own that buffer (see createAndUploadIntoGpuMemory's
+    // upload_indices) — vklDestroyHostCoherentBufferAndItsBackingMemory itself errors out on a null handle,
+    // so each field must be skipped explicitly rather than passed through unconditionally.
+    if (geometry.indicesBuffer != VK_NULL_HANDLE) {
+        vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.indicesBuffer);
+    }
+    if (geometry.positionsBuffer != VK_NULL_HANDLE) {
+        vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.positionsBuffer);
+    }
+    if (geometry.normalsBuffer != VK_NULL_HANDLE) {
+        vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.normalsBuffer);
+    }
 }
 
 void updateGeometryNormals(const Geometry& geometry, const std::vector<glm::vec3>& normals) {
