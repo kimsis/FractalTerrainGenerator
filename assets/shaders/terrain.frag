@@ -12,6 +12,7 @@ layout (binding = 1) uniform UniformBufferFrag {
 	uvec2 debugToggles; // x = drawNormals (N), y = highlightChunkBorders (F3)
 	bool isUnderwater;
 	float chunkWidth;
+	float roughness;
 } ub_data;
 
 const float BORDER_HIGHLIGHT_HALF_WIDTH = 0.5; // 1 world unit wide, independent of vertex spacing
@@ -44,9 +45,13 @@ void main() {
 	vec3 color = baseColor * ub_data.materialProperties[0];
 
 	float diffuseF  = ub_data.materialProperties[1];
-	float specularF = ub_data.materialProperties[2];
-	float specularA = ub_data.materialProperties[3];
-	
+	// Roughness dims and broadens the specular highlight: at 0 it's the original sharp/shiny look;
+	// at 1 it's fully matte. Needed because the terrain's per-triangle normal variance made small,
+	// disconnected specular highlights ("stars") visible along triangle edges at a fixed, narrow
+	// specular exponent.
+	float specularF = ub_data.materialProperties[2] * (1.0 - ub_data.roughness);
+	float specularA = mix(ub_data.materialProperties[3], 1.0, ub_data.roughness);
+
 	// Add directional light's contribution:
 	color += phong(
 		n, 

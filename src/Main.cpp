@@ -207,6 +207,12 @@ struct UniformBufferFrag {
     /*! World-space width of one terrain chunk ((gridSize - 1) * spacing), used by terrain.frag to
      *	find how close a fragment's world position is to a chunk boundary. */
     float chunkWidth;
+
+    /*! GUI-adjustable surface roughness in [0, 1]: 0 keeps the original sharp/shiny specular
+     *	highlight, 1 broadens and dims it to a matte look. Introduced because the terrain's high
+     *	triangle-to-triangle normal variance made small, disconnected specular highlights ("stars")
+     *	visible along triangle edges at the original fixed specular exponent/intensity. */
+    float roughness;
 };
 
 /*!
@@ -268,6 +274,7 @@ struct TerrainScene {
 
     float heightScale;
     float waterLevel;
+    float roughness;
 };
 
 /*!
@@ -1764,6 +1771,7 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
 TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, TerrainParams& params) {
     TerrainScene scene{};
     scene.heightScale = 1.0f;
+    scene.roughness = 0.6f;
     scene.chunkManager.baseParams = params;
     scene.chunkManager.viewRadius = g_chunk_view_radius;
     g_hurst = params.hurst;
@@ -1845,6 +1853,7 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
     ub_frag_data.isUnderwater = camera->getPosition().z < scene.waterLevel * scene.heightScale ? 1 : 0;
     int gridSize = (1 << scene.chunkManager.baseParams.gridSizeExponent) + 1;
     ub_frag_data.chunkWidth = static_cast<float>((gridSize - 1) * scene.chunkManager.baseParams.spacing);
+    ub_frag_data.roughness = scene.roughness;
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_frag, &ub_frag_data, sizeof(UniformBufferFrag));
 
     VkPipeline& selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
@@ -2098,6 +2107,9 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
 
     labelThenRightAlignedWidget("Height Scale", kSliderWidth);
     ImGui::SliderFloat("##heightScale", &scene.heightScale, 0.000001f, 5.0f, "%f", flags_for_sliders);
+
+    labelThenRightAlignedWidget("Roughness", kSliderWidth);
+    ImGui::SliderFloat("##roughness", &scene.roughness, 0.0f, 1.0f, "%f", flags_for_sliders);
 
     labelThenRightAlignedWidget("Water level", kSliderWidth);
     ImGui::SliderFloat("##waterLevel", &scene.waterLevel, -25.0f, 25.0f, "%f", flags_for_sliders);
