@@ -1849,9 +1849,7 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
         const LoadedChunk& chunk = entry.second;
         bool is_blending = chunk.from.positionsBuffer != VK_NULL_HANDLE;
         float blend_factor =
-            is_blending
-                ? glm::clamp(static_cast<float>((currentTime - chunk.blendStartTime) / scene.chunkManager.blendDuration), 0.0f, 1.0f)
-                : 1.0f;
+            is_blending ? glm::clamp(static_cast<float>((currentTime - chunk.blendStartTime) / scene.chunkManager.blendDuration), 0.0f, 1.0f) : 1.0f;
 
         TerrainPushConstants push_constants{blend_factor, is_blending ? 1u : 0u};
         vkCmdPushConstants(cb, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0u, sizeof(TerrainPushConstants), &push_constants);
@@ -2068,9 +2066,9 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
 
     size_t generating_count = chunksStillGenerating(scene.chunkManager);
     bool is_regenerating = isRegenerating(scene.chunkManager);
-    std::string generation_status_string = generating_count > 0     ? "Generating (" + std::to_string(generating_count) + " chunks)"
-                                            : is_regenerating        ? "Blending..."
-                                                                      : "Generated";
+    std::string generation_status_string = generating_count > 0 ? "Generating (" + std::to_string(generating_count) + " chunks)"
+                                           : is_regenerating    ? "Blending..."
+                                                                : "Generated";
     const char* generation_status_text = generation_status_string.c_str();
     float generation_status_offset = (ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(generation_status_text).x) * 0.5f;
     if (generation_status_offset > 0.0f) {
@@ -2093,7 +2091,7 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     ImGui::SliderFloat("##waterLevel", &scene.waterLevel, -25.0f, 25.0f, "%f", flags_for_sliders);
 
     labelThenRightAlignedWidget("Camera Speed", kSliderWidth);
-    ImGui::SliderFloat("##cameraSpeed", &g_camera_speed, 1.0f, 25.0f, "%f", flags_for_sliders);
+    ImGui::SliderFloat("##cameraSpeed", &g_camera_speed, 1.0f, 100.0f, "%f", flags_for_sliders);
 
     labelThenRightAlignedWidget("View Radius", kSliderWidth);
     ImGui::SliderInt("##viewRadius", &g_chunk_view_radius, 1, 32, "%d", flags_for_sliders);
