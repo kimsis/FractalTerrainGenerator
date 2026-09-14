@@ -9,9 +9,12 @@ layout (location = 0) in VertexData {
 layout (binding = 1) uniform UniformBufferFrag {
 	vec4 cameraPosition;
 	vec4 materialProperties; // ka, kd, ks, alpha
-	bool drawNormals;
+	uvec2 debugToggles; // x = drawNormals (N), y = highlightChunkBorders (F3)
 	bool isUnderwater;
+	float chunkWidth;
 } ub_data;
+
+const float BORDER_HIGHLIGHT_HALF_WIDTH = 0.5; // 1 world unit wide, independent of vertex spacing
 
 layout (binding = 2) uniform DirectionalLight {
 	vec4 color;
@@ -56,7 +59,7 @@ void main() {
 
 	out_color = vec4(color, 1.0);
 
-	if (ub_data.drawNormals) {
+	if (ub_data.debugToggles.x != 0u) {
 		vec3 scaledNormal = 0.5 * n + 0.5;
         out_color = vec4(pow(scaledNormal.x, 2.2), pow(scaledNormal.y, 2.2), pow(scaledNormal.z, 2.2), 1.0);
     }
@@ -64,5 +67,17 @@ void main() {
 	if (ub_data.isUnderwater) {
 		vec3 underwaterColor = vec3(0.0, 0.15, 0.3);
 		out_color = vec4(mix(out_color.rgb, underwaterColor, 0.6), out_color.a);
+	}
+
+	if (ub_data.debugToggles.y != 0u) {
+		// Chunk boundaries sit at world positions where (worldXY + chunkWidth/2) is an exact
+		// multiple of chunkWidth (see DiamondSquareGenerator's world-position formula); measure each
+		// fragment's distance to the nearest such multiple, on both axes.
+		vec2 shifted = frag_in.position_world.xy + vec2(ub_data.chunkWidth * 0.5);
+		vec2 distanceIntoCell = mod(shifted, ub_data.chunkWidth);
+		vec2 distanceToBoundary = min(distanceIntoCell, ub_data.chunkWidth - distanceIntoCell);
+		if (min(distanceToBoundary.x, distanceToBoundary.y) < BORDER_HIGHLIGHT_HALF_WIDTH) {
+			out_color = vec4(1.0, 0.0, 0.0, 1.0);
+		}
 	}
 }

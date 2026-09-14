@@ -195,12 +195,18 @@ struct UniformBufferFrag {
      *	First three are material coefficients, the last one is specular alpha. */
     glm::vec4 materialProperties;
 
-    /*! Debug toggle for the normal-visualization branch in terrain.frag. */
-    uint32_t drawNormals;
+    /*! Debug visualization toggles, each triggered by its own key: x = drawNormals (N), y =
+     *	highlightChunkBorders (F3). Grouped together since both are simple on/off overlays in
+     *	terrain.frag; unrelated to isUnderwater below, which reflects actual camera state. */
+    glm::uvec2 debugToggles;
 
     /*! Whether the camera is currently below the water plane; drives the underwater tint in
-     *  terrain.frag. A 4-byte type, not a native bool, for the same std140 reason as drawNormals. */
+     *  terrain.frag. A 4-byte type, not a native bool, for the same std140 reason as debugToggles. */
     uint32_t isUnderwater;
+
+    /*! World-space width of one terrain chunk ((gridSize - 1) * spacing), used by terrain.frag to
+     *	find how close a fragment's world position is to a chunk boundary. */
+    float chunkWidth;
 };
 
 /*!
@@ -501,6 +507,7 @@ static int g_polygon_mode_index = 0;
 static int g_culling_index = 0;
 
 static bool g_draw_normals = false;
+static bool g_highlight_chunk_borders = false;
 static bool g_toggle_camera = false;
 static bool g_toggle_camera_requested = false;
 static bool g_reseed_requested = false;
@@ -1357,6 +1364,9 @@ void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int a
     if (key == GLFW_KEY_F2) {
         g_culling_index = (g_culling_index + 1) % 3;
     }
+    if (key == GLFW_KEY_F3) {
+        g_highlight_chunk_borders = !g_highlight_chunk_borders;
+    }
     if (key == GLFW_KEY_N) {
         g_draw_normals = !g_draw_normals;
     }
@@ -1831,8 +1841,10 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
     UniformBufferFrag ub_frag_data;
     ub_frag_data.cameraPosition = glm::vec4{camera->getPosition(), 1.0f};
     ub_frag_data.materialProperties = {CORNELL_KA, CORNELL_KD, CORNELL_KS, CORNELL_ALPHA};
-    ub_frag_data.drawNormals = g_draw_normals ? 1 : 0;
+    ub_frag_data.debugToggles = glm::uvec2{g_draw_normals ? 1u : 0u, g_highlight_chunk_borders ? 1u : 0u};
     ub_frag_data.isUnderwater = camera->getPosition().z < scene.waterLevel * scene.heightScale ? 1 : 0;
+    int gridSize = (1 << scene.chunkManager.baseParams.gridSizeExponent) + 1;
+    ub_frag_data.chunkWidth = static_cast<float>((gridSize - 1) * scene.chunkManager.baseParams.spacing);
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_frag, &ub_frag_data, sizeof(UniformBufferFrag));
 
     VkPipeline& selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
