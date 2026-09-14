@@ -47,6 +47,14 @@ constexpr float CORNELL_KD = 0.9f;
 constexpr float CORNELL_KS = 0.3f;
 constexpr float CORNELL_ALPHA = 10.0f;
 
+// Height-based terrain color gradient (brown dirt in valleys/underwater -> green grass -> grey
+// rock on peaks). Offsets are in the same unscaled world units as waterLevel (both get multiplied
+// by heightScale below), so the gradient stays anchored to the water level and scales along with
+// the height exaggeration slider instead of using fixed, easily-wrong-looking world heights.
+constexpr float DIRT_TO_GRASS_HEIGHT_OFFSET = 3.0f;
+constexpr float GRASS_TO_ROCK_HEIGHT_OFFSET = 10.0f;
+constexpr float HEIGHT_COLOR_TRANSITION_BAND = 2.0f;
+
 constexpr size_t POLYMODES = 2;
 constexpr size_t CULLMODES = 3;
 constexpr VkPolygonMode kTerrainPolygonModes[POLYMODES] = {VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE};
@@ -213,6 +221,17 @@ struct UniformBufferFrag {
      *	triangle-to-triangle normal variance made small, disconnected specular highlights ("stars")
      *	visible along triangle edges at the original fixed specular exponent/intensity. */
     float roughness;
+
+    /*! World-space heights, deliberately *not* scaled by heightScale (unlike isUnderwater's
+     *	comparison), where terrain.frag's height-based color gradient transitions from dirt to grass,
+     *	and from grass to rock — so raising the height-exaggeration slider actually exposes more rock
+     *	at peaks instead of the color bands silently stretching to compensate. See
+     *	DIRT_TO_GRASS_HEIGHT_OFFSET/GRASS_TO_ROCK_HEIGHT_OFFSET. */
+    float dirtToGrassHeight;
+    float grassToRockHeight;
+
+    /*! Half-width, in the same (unscaled) world units, of each of the two color transitions above. */
+    float heightColorTransitionBand;
 };
 
 /*!
@@ -1772,6 +1791,10 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
     TerrainScene scene{};
     scene.heightScale = 1.0f;
     scene.roughness = 0.6f;
+    // DIRT_TO_GRASS_HEIGHT_OFFSET (3.0) minus 1 unit of margin: without the margin, the dirt/grass
+    // color transition's lower half (heightColorTransitionBand extends below the threshold) would
+    // sit right at or above the water line, showing grass poking through just-submerged terrain.
+    scene.waterLevel = DIRT_TO_GRASS_HEIGHT_OFFSET - 1.0f;
     scene.chunkManager.baseParams = params;
     scene.chunkManager.viewRadius = g_chunk_view_radius;
     g_hurst = params.hurst;
@@ -1854,6 +1877,9 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
     int gridSize = (1 << scene.chunkManager.baseParams.gridSizeExponent) + 1;
     ub_frag_data.chunkWidth = static_cast<float>((gridSize - 1) * scene.chunkManager.baseParams.spacing);
     ub_frag_data.roughness = scene.roughness;
+    ub_frag_data.dirtToGrassHeight = scene.waterLevel + DIRT_TO_GRASS_HEIGHT_OFFSET;
+    ub_frag_data.grassToRockHeight = scene.waterLevel + GRASS_TO_ROCK_HEIGHT_OFFSET;
+    ub_frag_data.heightColorTransitionBand = HEIGHT_COLOR_TRANSITION_BAND;
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_frag, &ub_frag_data, sizeof(UniformBufferFrag));
 
     VkPipeline& selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];

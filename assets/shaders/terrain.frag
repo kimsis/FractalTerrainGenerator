@@ -13,9 +13,17 @@ layout (binding = 1) uniform UniformBufferFrag {
 	bool isUnderwater;
 	float chunkWidth;
 	float roughness;
+	float dirtToGrassHeight;
+	float grassToRockHeight;
+	float heightColorTransitionBand;
 } ub_data;
 
 const float BORDER_HIGHLIGHT_HALF_WIDTH = 0.5; // 1 world unit wide, independent of vertex spacing
+
+// Slopes steeper than this show bare rock regardless of height, blended over a +/-5 degree band to
+// avoid a hard, aliased edge where the terrain crosses the threshold.
+const float SLOPE_ROCK_ANGLE_DEG = 45.0;
+const float SLOPE_ROCK_TRANSITION_DEG = 5.0;
 
 layout (binding = 2) uniform DirectionalLight {
 	vec4 color;
@@ -39,7 +47,34 @@ void main() {
 	
 	vec3 n = normalize(frag_in.normal_world);
 	vec3 v = normalize(ub_data.cameraPosition.xyz - frag_in.position_world.xyz);
-	vec3 baseColor = vec3(0.4, 0.6, 0.3);
+
+	// Height-based color: brown dirt in valleys/underwater, green grass at mid elevation, grey rock
+	// on peaks, smoothly blended across dirtToGrassHeight/grassToRockHeight.
+	vec3 dirtColor = vec3(0.45, 0.35, 0.20);
+	vec3 grassColor = vec3(0.4, 0.6, 0.3);
+	vec3 rockColor = vec3(0.22, 0.22, 0.22);
+	float height = frag_in.position_world.z;
+	vec3 baseColor = mix(dirtColor, grassColor, smoothstep(
+		ub_data.dirtToGrassHeight - ub_data.heightColorTransitionBand,
+		ub_data.dirtToGrassHeight + ub_data.heightColorTransitionBand,
+		height
+	));
+	baseColor = mix(baseColor, rockColor, smoothstep(
+		ub_data.grassToRockHeight - ub_data.heightColorTransitionBand,
+		ub_data.grassToRockHeight + ub_data.heightColorTransitionBand,
+		height
+	));
+
+	// Steep slopes are bare rock regardless of height (soil/grass can't hold on a cliff face).
+	// dot(n, up) is cos(slopeAngle); it decreases as the slope steepens, so the smoothstep edges are
+	// the cosines of the transition band's steep/shallow ends (in that order, since cos is decreasing).
+	float upDot = dot(n, vec3(0.0, 0.0, 1.0));
+	float slopeRockFactor = 1.0 - smoothstep(
+		cos(radians(SLOPE_ROCK_ANGLE_DEG + SLOPE_ROCK_TRANSITION_DEG)),
+		cos(radians(SLOPE_ROCK_ANGLE_DEG - SLOPE_ROCK_TRANSITION_DEG)),
+		upDot
+	);
+	baseColor = mix(baseColor, rockColor, slopeRockFactor);
 
 	// Start with ambient illumination contribution:
 	vec3 color = baseColor * ub_data.materialProperties[0];
