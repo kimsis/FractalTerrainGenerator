@@ -27,7 +27,7 @@ case "$(uname -s)" in
     *) PLATFORM="$(uname -s)" ;;
 esac
 
-PACKAGE_NAME="FractalTerrainViewer${PLATFORM}"
+PACKAGE_NAME="FractalTerrainGenerator${PLATFORM}"
 ZIP_PATH="$REPO_ROOT/${PACKAGE_NAME}.zip"
 
 STAGING_DIR="$(mktemp -d)"
