@@ -5,10 +5,14 @@
  * Original version created by Lukas Gersthofer and Bernhard Steiner.
  * Vulkan edition created by Johannes Unterguggenberger (junt@cg.tuwien.ac.at).
  */
-#include <GLFW/glfw3.h>
-#include <VulkanLaunchpad.h>
+// vulkan/vulkan.h must come before GLFW/glfw3.h and VulkanLaunchpad.h below — neither of those
+// headers includes it themselves, they just assume the includer already did. Keep this its own
+// include block (blank line on both sides) so an editor's "sort includes" doesn't merge it
+// alphabetically into the block below and reorder it after them again.
 #include <vulkan/vulkan.h>
 
+#include <GLFW/glfw3.h>
+#include <VulkanLaunchpad.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
