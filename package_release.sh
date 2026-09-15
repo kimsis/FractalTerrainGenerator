@@ -19,7 +19,15 @@ done
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$REPO_ROOT/build-release"
 EXECUTABLE_NAME="VulkanLaunchpadStarter"
-PACKAGE_NAME="FractalTerrainViewer"
+
+case "$(uname -s)" in
+    Linux*) PLATFORM="Linux" ;;
+    Darwin*) PLATFORM="macOS" ;;
+    MINGW*|MSYS*|CYGWIN*) PLATFORM="Windows" ;;
+    *) PLATFORM="$(uname -s)" ;;
+esac
+
+PACKAGE_NAME="FractalTerrainViewer${PLATFORM}"
 ZIP_PATH="$REPO_ROOT/${PACKAGE_NAME}.zip"
 
 STAGING_DIR="$(mktemp -d)"
@@ -50,10 +58,17 @@ if [ -z "$EXECUTABLE_PATH" ]; then
     exit 1
 fi
 
+# Ship the executable under the app's own name, not the starter template's — keep the .exe
+# extension if that's what was actually built.
+case "$EXECUTABLE_PATH" in
+    *.exe) DEST_EXECUTABLE_NAME="FractalTerrainViewer.exe" ;;
+    *) DEST_EXECUTABLE_NAME="FractalTerrainViewer" ;;
+esac
+
 PKG_DIR="$STAGING_DIR/$PACKAGE_NAME"
 mkdir -p "$PKG_DIR/assets/shaders" "$PKG_DIR/assets/settings"
 
-cp "$EXECUTABLE_PATH" "$PKG_DIR/"
+cp "$EXECUTABLE_PATH" "$PKG_DIR/$DEST_EXECUTABLE_NAME"
 
 for f in terrain.vert terrain.frag water.vert water.frag; do
     src="$REPO_ROOT/assets/shaders/$f"
