@@ -183,19 +183,24 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
             auto existing = manager.loadedChunks.find(it->first);
             if (existing == manager.loadedChunks.end()) {
                 Geometry newGeometry = createAndUploadIntoGpuMemory(data);
-                VkBuffer indices = createAndUploadIndexBuffer(data.indices);
-                uint32_t numberOfIndices = static_cast<uint32_t>(data.indices.size());
-                manager.loadedChunks[it->first] = LoadedChunk{Geometry{}, newGeometry, VK_NULL_HANDLE, indices, numberOfIndices, 0.0, missingMask};
+                // The shared index buffer is created once, ever, from whichever chunk happens to
+                // load first — every chunk's indices are byte-for-byte identical (see
+                // createAndUploadIndexBuffer's doc), so it doesn't matter which chunk's data this is.
+                if (manager.sharedIndicesBuffer == VK_NULL_HANDLE) {
+                    manager.sharedIndicesBuffer = createAndUploadIndexBuffer(data.indices);
+                    manager.sharedNumberOfIndices = static_cast<uint32_t>(data.indices.size());
+                }
+                manager.loadedChunks[it->first] = LoadedChunk{Geometry{}, newGeometry, VK_NULL_HANDLE, 0.0, missingMask};
                 uploaded_this_frame++;
             } else {
-                // Regeneration: this chunk's topology (indices) never changes across a Hurst/reseed
-                // change, so its index buffer (owned once at the chunk level — see
-                // LoadedChunk::indicesBuffer) isn't touched at all here. Positions/normals get the
-                // ping-pong treatment instead: a chunk's vertex count is also fixed for its whole
-                // lifetime, so instead of allocating a fresh combined buffer every time, reuse
-                // whichever of the chunk's two persistent buffers isn't currently `to` (its idle
-                // spare) — only the very first regeneration ever pays for a real allocation, to
-                // create that second buffer in the first place (see LoadedChunk::idleVertexBuffer).
+                // Regeneration: this chunk's topology never changes across a Hurst/reseed change, so
+                // the shared index buffer (see ChunkManager::sharedIndicesBuffer) isn't touched at
+                // all here. Positions/normals get the ping-pong treatment instead: a chunk's vertex
+                // count is also fixed for its whole lifetime, so instead of allocating a fresh
+                // combined buffer every time, reuse whichever of the chunk's two persistent buffers
+                // isn't currently `to` (its idle spare) — only the very first regeneration ever pays
+                // for a real allocation, to create that second buffer in the first place (see
+                // LoadedChunk::idleVertexBuffer).
                 Geometry newGeometry;
                 if (existing->second.idleVertexBuffer == VK_NULL_HANDLE) {
                     newGeometry = createAndUploadIntoGpuMemory(data);
@@ -269,15 +274,14 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
     for (auto it = manager.loadedChunks.begin(); it != manager.loadedChunks.end();) {
         LoadedChunk& chunk = it->second;
         if (!isWithinViewRadius(it->first, center, destroyRadius)) {
-            // Three real, distinct buffers to free exactly once each: `to`'s vertex buffer, the
-            // chunk's other persistent vertex buffer (see otherVertexBuffer), and its index buffer
-            // — owned once at the chunk level (LoadedChunk::indicesBuffer), so it's queued here
-            // directly rather than riding along inside a Geometry. Geometry{buffer, 0} is just a
-            // throwaway wrapper so destroyGeometryGpuMemory can be reused for a bare VkBuffer too.
+            // Two real, distinct buffers to free exactly once each: `to`'s vertex buffer and the
+            // chunk's other persistent vertex buffer (see otherVertexBuffer). The index buffer is
+            // NOT per-chunk anymore (see ChunkManager::sharedIndicesBuffer) — it outlives every
+            // individual chunk's eviction, only ever freed once, at cleanupChunkManager. Geometry{buffer,
+            // 0} is just a throwaway wrapper so destroyGeometryGpuMemory can be reused for a bare VkBuffer.
             VkBuffer other = otherVertexBuffer(chunk);
             if (other != VK_NULL_HANDLE) manager.pendingDestroys.push_back({Geometry{other, 0}, kDestroyDeferralCalls});
             manager.pendingDestroys.push_back({chunk.to, kDestroyDeferralCalls});
-            manager.pendingDestroys.push_back({Geometry{chunk.indicesBuffer, 0}, kDestroyDeferralCalls});
             it = manager.loadedChunks.erase(it);
             continue;
         }
@@ -330,9 +334,14 @@ void cleanupChunkManager(ChunkManager& manager) {
         VkBuffer other = otherVertexBuffer(entry.second);
         if (other != VK_NULL_HANDLE) destroyGeometryGpuMemory(Geometry{other, 0});
         destroyGeometryGpuMemory(entry.second.to);
-        destroyGeometryGpuMemory(Geometry{entry.second.indicesBuffer, 0});
     }
     manager.loadedChunks.clear();
+    // The one shared index buffer outlives every individual chunk's eviction — this is the only
+    // place it's ever actually freed.
+    if (manager.sharedIndicesBuffer != VK_NULL_HANDLE) {
+        destroyGeometryGpuMemory(Geometry{manager.sharedIndicesBuffer, 0});
+        manager.sharedIndicesBuffer = VK_NULL_HANDLE;
+    }
     for (auto& pending : manager.pendingDestroys) {
         destroyGeometryGpuMemory(pending.geometry);
     }

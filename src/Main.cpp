@@ -413,10 +413,20 @@ void recreateSwapchainAndDependents(
  *							which of its two vertex buffers plays the "from" role) is derived
  *							internally from `chunk.from`'s validity — the caller doesn't need to
  *							work that out itself.
+ *	@param	indices_buffer		The (shared, chunk-independent) index buffer — see
+ *								ChunkManager::sharedIndicesBuffer.
+ *	@param	number_of_indices	How many indices to draw from indices_buffer.
  *	@param	material		Valid handle to a descriptor set that refers to resources that contain material properties.
  *	@param	num_instances	How many instances to draw of the given geometry. Default = one single instance.
  */
-void drawGeometryWithMaterial(VkPipeline pipeline, const LoadedChunk& chunk, VkDescriptorSet material, uint32_t num_instances = 1u);
+void drawGeometryWithMaterial(
+    VkPipeline pipeline,
+    const LoadedChunk& chunk,
+    VkBuffer indices_buffer,
+    uint32_t number_of_indices,
+    VkDescriptorSet material,
+    uint32_t num_instances = 1u
+);
 
 /*!
  *	Builds (compiles + creates) the terrain pipeline for one (polygon mode, cull mode) combination,
@@ -1740,7 +1750,14 @@ void writeDescriptorSet(
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
 }
 
-void drawGeometryWithMaterial(VkPipeline pipeline, const LoadedChunk& chunk, VkDescriptorSet material, uint32_t num_instances) {
+void drawGeometryWithMaterial(
+    VkPipeline pipeline,
+    const LoadedChunk& chunk,
+    VkBuffer indices_buffer,
+    uint32_t number_of_indices,
+    VkDescriptorSet material,
+    uint32_t num_instances
+) {
     /* --------------------------------------------- */
     // Command Buffer Recording
     /* --------------------------------------------- */
@@ -1763,8 +1780,8 @@ void drawGeometryWithMaterial(VkPipeline pipeline, const LoadedChunk& chunk, VkD
     VkDeviceSize offsets[4] = {0, 0, geometry_from.normalsOffset, chunk.to.normalsOffset};
     vkCmdBindVertexBuffers(cb, 0u, 4u, vertex_buffers, offsets);
 
-    vkCmdBindIndexBuffer(cb, chunk.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cb, chunk.numberOfIndices, num_instances, 0u, 0u, 0u);
+    vkCmdBindIndexBuffer(cb, indices_buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cb, number_of_indices, num_instances, 0u, 0u, 0u);
 }
 
 /* --------------------------------------------- */
@@ -1914,7 +1931,13 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
         TerrainPushConstants push_constants{blend_factor, is_blending ? 1u : 0u};
         vkCmdPushConstants(cb, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0u, sizeof(TerrainPushConstants), &push_constants);
 
-        drawGeometryWithMaterial(selected_pipeline, chunk, scene.ds_terrain);
+        drawGeometryWithMaterial(
+            selected_pipeline,
+            chunk,
+            scene.chunkManager.sharedIndicesBuffer,
+            scene.chunkManager.sharedNumberOfIndices,
+            scene.ds_terrain
+        );
     }
 }
 
