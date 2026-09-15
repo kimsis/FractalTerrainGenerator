@@ -1,3 +1,5 @@
+https://github.com/kimsis/FractalTerrainGenerator/releases/tag/v1.0.0
+
 # Fractal Terrain Generator :mountain:
 
 A real-time fractal terrain viewer built with Vulkan, for the "Fractals VU" course assignment
