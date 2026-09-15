@@ -31,9 +31,10 @@ struct GeometryData {
 };
 
 /*!
- *	A struct that contains all data for a geometry object on the GPU-side:
- *	Contains all the buffer handles for vertex and index buffers which
- *	can be used for an indexed-geometry draw call.
+ *	A struct that contains the GPU-side vertex data buffer for one from/to blend snapshot.
+ *	Deliberately does NOT include an index buffer: a chunk's topology is invariant across every
+ *	Hurst/reseed regeneration, so it's owned once at the chunk level instead (see
+ *	ChunkManager::LoadedChunk) rather than duplicated into every from/to Geometry.
  */
 struct Geometry {
     // A handle to a single GPU buffer holding BOTH vertex positions (at byte offset 0) and vertex
@@ -45,15 +46,6 @@ struct Geometry {
 
     // Byte offset into vertexBuffer where normal data begins.
     VkDeviceSize normalsOffset;
-
-    // A handle to a GPU buffer that contains face indices data. Kept as its own separate
-    // allocation (not folded into vertexBuffer) because, unlike positions/normals, it's invariant
-    // across a chunk's regenerations and is reused rather than recreated — see
-    // createAndUploadIntoGpuMemory's `upload_indices` parameter.
-    VkBuffer indicesBuffer;
-
-    // The total number of indices contained within the indicesBuffer.
-    uint32_t numberOfIndices;
 };
 
 /*!
@@ -64,23 +56,18 @@ struct Geometry {
 GeometryData generateTerrainGeometry(const TerrainParams& params);
 
 /*!
- * Based on the (already populated!) GeometryData, creates gpu buffers for each of its elements
- * in host coherent GPU memory, uploads the data into these buffers, and returns a new Geometry
- * struct which contains handles to these buffers. Ensure to free the memory by using
- * freeGpuMemory(...)!
+ * Based on the (already populated!) GeometryData, creates a single combined GPU buffer holding
+ * positions+normals in host coherent GPU memory and uploads the data into it, returning a new
+ * Geometry struct with a handle to that buffer. Ensure to free the memory by using
+ * destroyGeometryGpuMemory(...)!
  *
  * @param	geometry_data	The CPU-side geometry that shall be transferred into GPU-side buffers.
  *							Its positions and normals are combined into a single `vertexBuffer`
- *							allocation (see Geometry).
- * @param	upload_indices	If false, skips creating/uploading the index buffer entirely — the
- *							returned Geometry's `indicesBuffer` is VK_NULL_HANDLE and
- *							`numberOfIndices` is 0, for the caller to fill in from an existing
- *							index buffer instead (see ChunkManager: a chunk's topology never
- *							changes across a Hurst/reseed regeneration, so its one-time index
- *							buffer is reused rather than recreated on every regeneration).
- * @return	A new Geometry instance containing handles to the newly created GPU buffers.
+ *							allocation (see Geometry). `indices` is ignored — its buffer is created
+ *							separately, once per chunk, by ChunkManager (see LoadedChunk::indicesBuffer).
+ * @return	A new Geometry instance containing a handle to the newly created GPU buffer.
  */
-Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data, bool upload_indices = true);
+Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data);
 
 /*!
  *	Overwrites an ALREADY-ALLOCATED vertexBuffer's positions+normals regions in place (same layout
@@ -98,17 +85,19 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data, bool up
 VkDeviceSize uploadVertexDataInPlace(VkBuffer vertexBuffer, const GeometryData& geometry_data);
 
 /*!
- *	Frees whichever of `geometry`'s buffers are non-null. Passing a VK_NULL_HANDLE field is
- *	explicitly safe (a no-op for that buffer) — used when a Geometry doesn't own its index buffer
- *	(see createAndUploadIntoGpuMemory's `upload_indices`) and that field is left null.
+ *	Frees `geometry`'s vertex buffer, if it's non-null. Passing a VK_NULL_HANDLE `vertexBuffer` is
+ *	explicitly safe (a no-op) — used when wrapping a chunk-level buffer that legitimately might not
+ *	have been allocated yet (see ChunkManager::LoadedChunk::idleVertexBuffer). Note this only
+ *	destroys the vertex buffer — a chunk's index buffer (see ChunkManager::createAndUploadIndexBuffer)
+ *	must be freed separately (also via this function, wrapped in a throwaway Geometry — see ChunkManager).
  */
 void destroyGeometryGpuMemory(const Geometry& geometry);
 
 /*!
  *	Overwrites an already-uploaded Geometry's normals region (within its combined vertexBuffer,
- *	at normalsOffset) in place, leaving positions/indices untouched. Used to patch previously-
- *	extrapolated edge normals once a neighboring chunk's real data becomes available (see
- *	ChunkManager) — a chunk's positions/indices never change after generation, so only its
- *	normals ever need updating post-upload.
+ *	at normalsOffset) in place, leaving positions untouched. Used to patch previously-extrapolated
+ *	edge normals once a neighboring chunk's real data becomes available (see ChunkManager) — a
+ *	chunk's positions never change after generation, so only its normals ever need updating
+ *	post-upload.
  */
 void updateGeometryNormals(const Geometry& geometry, const std::vector<glm::vec3>& normals);

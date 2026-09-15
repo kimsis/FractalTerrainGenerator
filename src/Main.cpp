@@ -405,21 +405,18 @@ void recreateSwapchainAndDependents(
 );
 
 /*!
- *	Bind the given descriptor se to use the material it represents for subsequent draw calls
- *	with the given pipeline, and render the given geometry (using its vertex and index buffers).
+ *	Bind the given descriptor set to use the material it represents for subsequent draw calls
+ *	with the given pipeline, and render the given chunk (using its vertex and index buffers).
  *	Record everything into the current command buffer as provided by the framework.
  *	@param	pipeline		Valid handle to a given pipeline which shall be used for drawing.
- *	@param	geometry_from		Reference to a geometry_from object containing the buffers to be used for drawing.
+ *	@param	chunk			The loaded chunk to draw. Whether it's currently blending (and if so,
+ *							which of its two vertex buffers plays the "from" role) is derived
+ *							internally from `chunk.from`'s validity — the caller doesn't need to
+ *							work that out itself.
  *	@param	material		Valid handle to a descriptor set that refers to resources that contain material properties.
  *	@param	num_instances	How many instances to draw of the given geometry. Default = one single instance.
  */
-void drawGeometryWithMaterial(
-    VkPipeline pipeline,
-    const Geometry& geometry_from,
-    const Geometry& geometry_to,
-    VkDescriptorSet material,
-    uint32_t num_instances = 1u
-);
+void drawGeometryWithMaterial(VkPipeline pipeline, const LoadedChunk& chunk, VkDescriptorSet material, uint32_t num_instances = 1u);
 
 /*!
  *	Builds (compiles + creates) the terrain pipeline for one (polygon mode, cull mode) combination,
@@ -1743,13 +1740,7 @@ void writeDescriptorSet(
     vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
 }
 
-void drawGeometryWithMaterial(
-    VkPipeline pipeline,
-    const Geometry& geometry_from,
-    const Geometry& geometry_to,
-    VkDescriptorSet material,
-    uint32_t num_instances
-) {
+void drawGeometryWithMaterial(VkPipeline pipeline, const LoadedChunk& chunk, VkDescriptorSet material, uint32_t num_instances) {
     /* --------------------------------------------- */
     // Command Buffer Recording
     /* --------------------------------------------- */
@@ -1762,14 +1753,18 @@ void drawGeometryWithMaterial(
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u, &material, 0u, nullptr);
 
     vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    // Not blending: `from` is empty, so substitute `to` in its place (this chunk never had a blend
+    // source, so there's nothing to blend from — see LoadedChunk).
+    bool is_blending = chunk.from.vertexBuffer != VK_NULL_HANDLE;
+    const Geometry& geometry_from = is_blending ? chunk.from : chunk.to;
     // Positions and normals now share one combined buffer per Geometry (see Geometry::vertexBuffer)
     // — the same VkBuffer is bound twice here, once per offset, which Vulkan allows.
-    VkBuffer vertex_buffers[4] = {geometry_from.vertexBuffer, geometry_to.vertexBuffer, geometry_from.vertexBuffer, geometry_to.vertexBuffer};
-    VkDeviceSize offsets[4] = {0, 0, geometry_from.normalsOffset, geometry_to.normalsOffset};
+    VkBuffer vertex_buffers[4] = {geometry_from.vertexBuffer, chunk.to.vertexBuffer, geometry_from.vertexBuffer, chunk.to.vertexBuffer};
+    VkDeviceSize offsets[4] = {0, 0, geometry_from.normalsOffset, chunk.to.normalsOffset};
     vkCmdBindVertexBuffers(cb, 0u, 4u, vertex_buffers, offsets);
 
-    vkCmdBindIndexBuffer(cb, geometry_to.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cb, geometry_to.numberOfIndices, num_instances, 0u, 0u, 0u);
+    vkCmdBindIndexBuffer(cb, chunk.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cb, chunk.numberOfIndices, num_instances, 0u, 0u, 0u);
 }
 
 /* --------------------------------------------- */
@@ -1919,8 +1914,7 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
         TerrainPushConstants push_constants{blend_factor, is_blending ? 1u : 0u};
         vkCmdPushConstants(cb, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0u, sizeof(TerrainPushConstants), &push_constants);
 
-        const Geometry& geometry_from = is_blending ? chunk.from : chunk.to;
-        drawGeometryWithMaterial(selected_pipeline, geometry_from, chunk.to, scene.ds_terrain);
+        drawGeometryWithMaterial(selected_pipeline, chunk, scene.ds_terrain);
     }
 }
 

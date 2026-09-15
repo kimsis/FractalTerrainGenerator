@@ -38,6 +38,14 @@ struct LoadedChunk {
     // will become the true idle spare once the blend completes.
     VkBuffer idleVertexBuffer = VK_NULL_HANDLE;
 
+    // This chunk's index buffer — its triangle topology, a pure function of grid size that never
+    // changes across a Hurst/reseed regeneration (see createAndUploadIndexBuffer, below). Owned
+    // once here at the chunk level, not duplicated into every from/to Geometry: created at first
+    // load and reused for the chunk's entire lifetime. Unlike vertexBuffer, there's no ping-pong
+    // pair needed for it, since it's never rewritten — only ever read.
+    VkBuffer indicesBuffer;
+    uint32_t numberOfIndices;
+
     double blendStartTime;
 
     // Which of this chunk's neighbors (see NeighborBit) were missing — outside the loaded window,
@@ -65,6 +73,17 @@ struct PendingDestroy {
     Geometry geometry;
     int callsRemaining;
 };
+
+/*!
+ *	Creates and uploads a chunk's index buffer — its triangle topology, which is a pure function of
+ *	grid size and therefore invariant across every Hurst/reseed regeneration. Called exactly once
+ *	per chunk, at its first load (see updateLoadedChunks); the caller stores the returned handle in
+ *	LoadedChunk::indicesBuffer and reuses it for that chunk's entire lifetime, never recreating it.
+ *
+ *	@param	indices	The triangle index data to upload. Must not be empty.
+ *	@return	A handle to the newly created, uploaded index buffer.
+ */
+VkBuffer createAndUploadIndexBuffer(const std::vector<uint32_t>& indices);
 
 /*!
  *	Owns the set of terrain chunks currently loaded around the camera, generating new ones on
