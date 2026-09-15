@@ -26,6 +26,18 @@ enum NeighborBit : uint8_t {
 struct LoadedChunk {
     Geometry from;
     Geometry to;
+
+    // The chunk's OTHER vertex buffer — its ping-pong partner, not currently referenced by `to`.
+    // A chunk's vertex count never changes after first load (grid size is fixed), so instead of
+    // freeing and recreating a vertex buffer on every regeneration, updateLoadedChunks alternates
+    // writing new positions/normals data between exactly two persistent buffers, swapping which one
+    // is `to` each time — the same buffer just gets reused forever, no allocation after the first.
+    // VK_NULL_HANDLE until this chunk's first-ever regeneration (its second buffer is allocated
+    // lazily then, since a chunk that's evicted before ever regenerating never needs one at all).
+    // While blending (`from` valid), this field duplicates `from.vertexBuffer` — the buffer that
+    // will become the true idle spare once the blend completes.
+    VkBuffer idleVertexBuffer = VK_NULL_HANDLE;
+
     double blendStartTime;
 
     // Which of this chunk's neighbors (see NeighborBit) were missing — outside the loaded window,
@@ -36,8 +48,9 @@ struct LoadedChunk {
 };
 
 /*!
- *	A chunk's GPU geometry that's no longer referenced by `loadedChunks` (evicted or a finished
- *	blend's `from`), queued for actual destruction rather than freed immediately. Destroying it while
+ *	A chunk's GPU geometry that's no longer referenced by `loadedChunks` (evicted — a finished
+ *	blend's `from` destroys nothing at all; see LoadedChunk::idleVertexBuffer), queued for actual
+ *	destruction rather than freed immediately. Destroying it while
  *	still referenced by an already-submitted command buffer would be a GPU-side use-after-free; the
  *	naive guard is a synchronous `vkDeviceWaitIdle` before every destroy, but that drains the entire
  *	GPU pipeline and is expensive enough on its own to cause a visible stutter (measured live: ~30ms
@@ -109,16 +122,19 @@ struct ChunkManager {
     // it's a background refinement of stable geometry, not a Hurst/reseed change in progress.
     std::unordered_map<ChunkCoord, std::future<std::vector<glm::vec3>>> pendingRenormals;
 
-    // Geometry evicted or retired from a finished blend, not yet actually freed. See PendingDestroy.
+    // Geometry evicted, not yet actually freed. See PendingDestroy.
     std::vector<PendingDestroy> pendingDestroys;
 };
 
 /*!
  *	Call once per frame: advances chunk generation/upload/destroy around the camera, evicting
  *	anything more than (viewRadius + 1) chunks away. Uploads at most `maxUploadsPerFrame` newly-loaded
- *	chunks per call (regeneration uploads are uncapped). An evicted chunk or a finished blend's `from`
- *	is queued in `pendingDestroys` rather than freed immediately (see that struct's doc for why); up
- *	to `maxDestroysPerFrame` eligible entries are actually freed per call. Also revisits any loaded
+ *	chunks per call (regeneration uploads are uncapped, and — since a regeneration reuses a chunk's
+ *	existing persistent buffers rather than allocating new ones once it's regenerated at least once
+ *	before — cheap enough in steady state that they rarely need capping anyway; see
+ *	LoadedChunk::idleVertexBuffer). An evicted chunk is queued in `pendingDestroys` rather than freed
+ *	immediately (see that struct's doc for why); up to `maxDestroysPerFrame` eligible entries are
+ *	actually freed per call. Also revisits any loaded
  *	chunk whose `missingNeighborMask` is nonzero: once a previously-missing neighbor has real data,
  *	that chunk's normals are re-derived in the background and its normals buffer patched in place
  *	once ready (see LoadedChunk::missingNeighborMask and pendingRenormals).

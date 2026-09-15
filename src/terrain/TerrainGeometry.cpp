@@ -35,6 +35,17 @@ GeometryData generateTerrainGeometry(const TerrainParams& params) {
     return data;
 }
 
+VkDeviceSize uploadVertexDataInPlace(VkBuffer vertexBuffer, const GeometryData& geometry_data) {
+    size_t positions_buffer_byte_size = geometry_data.positions.size() * sizeof(geometry_data.positions[0]);
+    size_t normals_buffer_byte_size = geometry_data.normals.size() * sizeof(geometry_data.normals[0]);
+    VkDeviceSize normals_offset = alignUp(static_cast<VkDeviceSize>(positions_buffer_byte_size), kVertexSubBufferAlignment);
+
+    vklCopyDataIntoHostCoherentBuffer(vertexBuffer, 0, geometry_data.positions.data(), positions_buffer_byte_size);
+    vklCopyDataIntoHostCoherentBuffer(vertexBuffer, normals_offset, geometry_data.normals.data(), normals_buffer_byte_size);
+
+    return normals_offset;
+}
+
 Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data, bool upload_indices) {
     if (geometry_data.positions.empty()) {
         VKL_EXIT_WITH_ERROR("An empty GeometryData::positions vector has been passed to createAndUploadIntoGpuMemory(...)");
@@ -47,9 +58,7 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data, bool up
 
     // Positions and normals combined into one buffer/allocation — positions at offset 0, normals
     // right after (aligned) — so this costs one vkCreateBuffer/vkAllocateMemory call instead of
-    // two. This is the pair that gets recreated on every Hurst/reseed regeneration (unlike
-    // indices, below), so halving its allocation count directly halves the regeneration-time
-    // GPU-call overhead that was still causing a stutter after indices were made reusable.
+    // two.
     size_t positions_buffer_byte_size = geometry_data.positions.size() * sizeof(geometry_data.positions[0]);
     size_t normals_buffer_byte_size = geometry_data.normals.size() * sizeof(geometry_data.normals[0]);
     VkDeviceSize normals_offset = alignUp(static_cast<VkDeviceSize>(positions_buffer_byte_size), kVertexSubBufferAlignment);
@@ -57,9 +66,7 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data, bool up
 
     result.vertexBuffer =
         vklCreateHostCoherentBufferWithBackingMemory(vertex_buffer_byte_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-    vklCopyDataIntoHostCoherentBuffer(result.vertexBuffer, 0, geometry_data.positions.data(), positions_buffer_byte_size);
-    vklCopyDataIntoHostCoherentBuffer(result.vertexBuffer, normals_offset, geometry_data.normals.data(), normals_buffer_byte_size);
-    result.normalsOffset = normals_offset;
+    result.normalsOffset = uploadVertexDataInPlace(result.vertexBuffer, geometry_data);
 
     if (upload_indices) {
         // Create indices buffer and copy data into it:

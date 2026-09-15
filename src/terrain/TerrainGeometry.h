@@ -83,6 +83,21 @@ GeometryData generateTerrainGeometry(const TerrainParams& params);
 Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data, bool upload_indices = true);
 
 /*!
+ *	Overwrites an ALREADY-ALLOCATED vertexBuffer's positions+normals regions in place (same layout
+ *	as createAndUploadIntoGpuMemory: positions at offset 0, normals at the returned offset) —
+ *	no GPU allocation happens here at all. `vertexBuffer` must already be big enough to hold
+ *	`geometry_data`'s positions+normals, which holds whenever it was originally sized for the same
+ *	grid dimensions (a chunk's vertex count never changes after its first load — see ChunkManager's
+ *	ping-pong `LoadedChunk::idleVertexBuffer`, the reason this function exists: reusing one of a
+ *	chunk's two persistent vertex buffers on every regeneration instead of allocating a new one).
+ *
+ *	@param	vertexBuffer	An existing buffer, at least as large as this call will write into it.
+ *	@param	geometry_data	The CPU-side geometry to overwrite it with.
+ *	@return	The byte offset within vertexBuffer where normals were written.
+ */
+VkDeviceSize uploadVertexDataInPlace(VkBuffer vertexBuffer, const GeometryData& geometry_data);
+
+/*!
  *	Frees whichever of `geometry`'s buffers are non-null. Passing a VK_NULL_HANDLE field is
  *	explicitly safe (a no-op for that buffer) — used when a Geometry doesn't own its index buffer
  *	(see createAndUploadIntoGpuMemory's `upload_indices`) and that field is left null.

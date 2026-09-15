@@ -28,15 +28,13 @@ static std::vector<float> sampleRow(const GeometryData& data, int size, int loca
 // sits in whenever that chunk isn't currently blending.
 static bool isValidGeometry(const Geometry& geometry) { return geometry.vertexBuffer != VK_NULL_HANDLE; }
 
-// A chunk's index buffer is created once, on its first upload, and then shared for the chunk's
-// entire lifetime across every later Hurst/reseed regeneration (see step 4) — `to.indicesBuffer`
-// is always that one persistent handle, and whenever `from` is valid it's always the very same
-// handle too, not a separate copy. Queueing/destroying a `from` must therefore never take its
-// indices buffer down with it, or the `to` that still depends on it would be left dangling.
-static Geometry withoutIndices(Geometry geometry) {
-    geometry.indicesBuffer = VK_NULL_HANDLE;
-    geometry.numberOfIndices = 0;
-    return geometry;
+// The chunk's persistent vertex buffer that ISN'T currently `to` — its ping-pong partner (see
+// LoadedChunk::idleVertexBuffer). While blending, that's `from.vertexBuffer` itself (the buffer
+// that will become the true idle spare once the blend completes); once not blending, it's
+// `idleVertexBuffer` directly. VK_NULL_HANDLE if this chunk has never regenerated even once (its
+// second buffer is allocated lazily on first regeneration — see step 4).
+static VkBuffer otherVertexBuffer(const LoadedChunk& chunk) {
+    return isValidGeometry(chunk.from) ? chunk.from.vertexBuffer : chunk.idleVertexBuffer;
 }
 
 // Which of coord's 4 neighbors currently have no chunkData (see LoadedChunk::missingNeighborMask).
@@ -170,16 +168,29 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
             auto existing = manager.loadedChunks.find(it->first);
             if (existing == manager.loadedChunks.end()) {
                 Geometry newGeometry = createAndUploadIntoGpuMemory(data);
-                manager.loadedChunks[it->first] = LoadedChunk{Geometry{}, newGeometry, 0.0, missingMask};
+                manager.loadedChunks[it->first] = LoadedChunk{Geometry{}, newGeometry, VK_NULL_HANDLE, 0.0, missingMask};
                 uploaded_this_frame++;
             } else {
                 // Regeneration: this chunk's topology (indices) never changes across a Hurst/reseed
                 // change, so reuse its existing index buffer instead of paying for another GPU
-                // allocation (see TerrainGeometry.h's upload_indices parameter) — cuts the per-chunk
-                // regeneration cost from 3 buffer allocations down to 2.
-                Geometry newGeometry = createAndUploadIntoGpuMemory(data, /*upload_indices=*/false);
+                // allocation (see TerrainGeometry.h's upload_indices parameter). Positions/normals
+                // get the same treatment via ping-pong: a chunk's vertex count is also fixed for its
+                // whole lifetime, so instead of allocating a fresh combined buffer every time, reuse
+                // whichever of the chunk's two persistent buffers isn't currently `to` (its idle
+                // spare) — only the very first regeneration ever pays for a real allocation, to
+                // create that second buffer in the first place (see LoadedChunk::idleVertexBuffer).
+                Geometry newGeometry;
                 newGeometry.indicesBuffer = existing->second.to.indicesBuffer;
                 newGeometry.numberOfIndices = existing->second.to.numberOfIndices;
+                if (existing->second.idleVertexBuffer == VK_NULL_HANDLE) {
+                    Geometry fresh = createAndUploadIntoGpuMemory(data, /*upload_indices=*/false);
+                    newGeometry.vertexBuffer = fresh.vertexBuffer;
+                    newGeometry.normalsOffset = fresh.normalsOffset;
+                } else {
+                    newGeometry.vertexBuffer = existing->second.idleVertexBuffer;
+                    newGeometry.normalsOffset = uploadVertexDataInPlace(newGeometry.vertexBuffer, data);
+                }
+                existing->second.idleVertexBuffer = existing->second.to.vertexBuffer;
                 existing->second.from = existing->second.to;
                 existing->second.to = newGeometry;
                 existing->second.blendStartTime = currentTime;
@@ -234,20 +245,24 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
     }
 
     // 7-8. One pass over loadedChunks: evict anything that's fallen more than (viewRadius + 1)
-    // chunks away, else clear the now-unused `from` of any chunk whose blend has finished. Both cases
-    // just queue the freed Geometry in pendingDestroys (see PendingDestroy) rather than destroy it
+    // chunks away, else clear the now-unused `from` of any chunk whose blend has finished. Eviction
+    // queues the chunk's Geometry in pendingDestroys (see PendingDestroy) rather than destroying it
     // outright, so this pass is cheap bookkeeping regardless of how many chunks a single chunk-border
-    // crossing or mass regeneration affects at once — the real GPU cost is paid gradually below.
+    // crossing or mass regeneration affects at once — the real GPU cost is paid gradually below. A
+    // finished blend, unlike eviction, destroys nothing at all: `from`'s vertex buffer is this
+    // chunk's persistent ping-pong spare (see LoadedChunk::idleVertexBuffer) and stays alive, ready
+    // to be overwritten in place by the chunk's next regeneration instead of being freed and
+    // reallocated.
     for (auto it = manager.loadedChunks.begin(); it != manager.loadedChunks.end();) {
         LoadedChunk& chunk = it->second;
         if (!isWithinViewRadius(it->first, center, destroyRadius)) {
-            if (isValidGeometry(chunk.from)) manager.pendingDestroys.push_back({withoutIndices(chunk.from), kDestroyDeferralCalls});
+            VkBuffer other = otherVertexBuffer(chunk);
+            if (other != VK_NULL_HANDLE) manager.pendingDestroys.push_back({Geometry{other, 0, VK_NULL_HANDLE, 0}, kDestroyDeferralCalls});
             manager.pendingDestroys.push_back({chunk.to, kDestroyDeferralCalls});
             it = manager.loadedChunks.erase(it);
             continue;
         }
         if (isValidGeometry(chunk.from) && currentTime - chunk.blendStartTime >= manager.blendDuration) {
-            manager.pendingDestroys.push_back({withoutIndices(chunk.from), kDestroyDeferralCalls});
             chunk.from = Geometry{};
         }
         ++it;
@@ -293,7 +308,8 @@ bool isRegenerating(const ChunkManager& manager) {
 
 void cleanupChunkManager(ChunkManager& manager) {
     for (auto& entry : manager.loadedChunks) {
-        if (isValidGeometry(entry.second.from)) destroyGeometryGpuMemory(withoutIndices(entry.second.from));
+        VkBuffer other = otherVertexBuffer(entry.second);
+        if (other != VK_NULL_HANDLE) destroyGeometryGpuMemory(Geometry{other, 0, VK_NULL_HANDLE, 0});
         destroyGeometryGpuMemory(entry.second.to);
     }
     manager.loadedChunks.clear();
