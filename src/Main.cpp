@@ -2204,22 +2204,9 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     }
     ImGui::EndDisabled();
 
-    if (g_demo_mode) {
-        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.0f, 1.0f), "Demo mode (F4): ON");
-    }
     ImGui::Text("Camera Mode: %s", g_toggle_camera ? "Fly" : "Trackball");
     ImGui::Text("Camera Position: (%.2f, %.2f, %.2f)", cameraPosition.x, cameraPosition.y, cameraPosition.z);
     ImGui::Text("Camera Forward:  (%.2f, %.2f, %.2f)", cameraForward.x, cameraForward.y, cameraForward.z);
-
-    ImGui::Separator();
-    ImGui::Text("Controls:");
-    ImGui::Text("C: Toggle fly/trackball camera");
-    ImGui::Text("F1: Toggle wireframe mode");
-    ImGui::Text("F2: Cycle face culling mode");
-    ImGui::Text("N: Toggle normals debug view");
-    ImGui::Text("R: Reseed terrain");
-    ImGui::Text("Esc: Quit application");
-    ImGui::Text("Shift: Double camera speed");
 
     ImGui::Separator();
     ImGui::Text("Trackball Camera:");
@@ -2235,6 +2222,20 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     ImGui::Text("D: Strafe right");
     ImGui::Text("Space: Move up");
     ImGui::Text("Ctrl: Move down");
+
+    ImGui::Separator();
+    ImGui::Text("Controls:");
+    ImGui::Text("C: Toggle fly/trackball camera");
+    ImGui::Text("F1: Toggle wireframe mode");
+    ImGui::Text("F2: Cycle face culling mode");
+    ImGui::Text("F3: Toggle chunk-boundary debug overlay");
+    ImGui::Text("F5: Hot-reload shaders");
+    ImGui::Text("N: Toggle normals debug view");
+    ImGui::Text("R: Reseed terrain");
+    ImGui::Text("Esc: Quit application");
+    ImGui::Text("Shift: Double camera speed");
+    std::string demo_label = std::string("F4: Demo mode: ") + (g_demo_mode ? "ON" : "OFF");
+    ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.0f, 1.0f), "%s", demo_label.c_str());
 
     ImGui::End();
 }

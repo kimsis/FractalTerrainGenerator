@@ -11,14 +11,15 @@ teaching framework, plus [Dear ImGui](https://github.com/ocornut/imgui) for the 
 
 ## Features
 
-- Diamond-Square heightfield generation with a GUI-adjustable Hurst exponent, height scale, and
-  reseed button
+- Diamond-Square heightfield generation with a GUI-adjustable Hurst exponent, roughness, height
+  scale, and reseed button
 - Smooth ~2-second blend transition when the Hurst exponent or seed changes, instead of an instant pop
 - Infinite, chunked terrain streaming around the camera (chunks generate/unload as you move, with
   seamlessly matching edges between neighbors)
 - Trackball camera (orbit/pan/zoom) and a WASD + mouselook fly camera, toggleable at runtime
 - A transparent, GUI-adjustable water plane
 - Resizable window
+- Demo mode: continuously randomizes Hurst/seed/height for a hands-off showcase
 
 ## Controls
 
@@ -31,15 +32,18 @@ teaching framework, plus [Dear ImGui](https://github.com/ocornut/imgui) for the 
 | Mouse | Look around (fly mode) |
 | `W`/`A`/`S`/`D` | Move (fly mode) |
 | `Space` / `Left Ctrl` | Move up / down (fly mode) |
-| `Left Shift` | Move faster (fly mode) |
+| `Left Shift` | Double camera speed (both modes) |
 | `R` | Reseed the terrain |
 | `F1` | Toggle wireframe |
 | `F2` | Cycle backface-culling mode |
+| `F3` | Toggle chunk-boundary debug overlay |
+| `F4` | Toggle demo mode |
+| `F5` | Hot-reload shaders |
 | `N` | Toggle normals debug view |
 | `Esc` | Quit |
 
-The Hurst exponent, height scale, water level, camera speed, view radius, and reseed button are all
-adjustable live from the "Terrain Settings" GUI panel.
+The Hurst exponent, roughness, height scale, water level, camera speed, view radius, and reseed
+button are all adjustable live from the "Terrain Settings" GUI panel.
 
 ## Building
 
