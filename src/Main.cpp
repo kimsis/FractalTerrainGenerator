@@ -409,12 +409,9 @@ void recreateSwapchainAndDependents(
  *	with the given pipeline, and render the given chunk (using its vertex and index buffers).
  *	Record everything into the current command buffer as provided by the framework.
  *	@param	pipeline		Valid handle to a given pipeline which shall be used for drawing.
- *	@param	chunk			The loaded chunk to draw. Whether it's currently blending (and if so,
- *							which of its two vertex buffers plays the "from" role) is derived
- *							internally from `chunk.from`'s validity — the caller doesn't need to
- *							work that out itself.
- *	@param	indices_buffer		The (shared, chunk-independent) index buffer — see
- *								ChunkManager::sharedIndicesBuffer.
+ *	@param	chunk			The loaded chunk to draw. Which of its two vertex buffers plays the
+ *							"from" role is derived internally from `chunk.from`'s validity.
+ *	@param	indices_buffer		The shared index buffer — see ChunkManager::sharedIndicesBuffer.
  *	@param	number_of_indices	How many indices to draw from indices_buffer.
  *	@param	material		Valid handle to a descriptor set that refers to resources that contain material properties.
  *	@param	num_instances	How many instances to draw of the given geometry. Default = one single instance.
@@ -1770,12 +1767,11 @@ void drawGeometryWithMaterial(
     vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u, &material, 0u, nullptr);
 
     vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    // Not blending: `from` is empty, so substitute `to` in its place (this chunk never had a blend
-    // source, so there's nothing to blend from — see LoadedChunk).
+    // Not blending: `from` is empty, so substitute `to` in its place.
     bool is_blending = chunk.from.vertexBuffer != VK_NULL_HANDLE;
     const Geometry& geometry_from = is_blending ? chunk.from : chunk.to;
-    // Positions and normals now share one combined buffer per Geometry (see Geometry::vertexBuffer)
-    // — the same VkBuffer is bound twice here, once per offset, which Vulkan allows.
+    // Positions and normals share one combined buffer per Geometry — the same VkBuffer is bound
+    // twice here, once per offset, which Vulkan allows.
     VkBuffer vertex_buffers[4] = {geometry_from.vertexBuffer, chunk.to.vertexBuffer, geometry_from.vertexBuffer, chunk.to.vertexBuffer};
     VkDeviceSize offsets[4] = {0, 0, geometry_from.normalsOffset, chunk.to.normalsOffset};
     vkCmdBindVertexBuffers(cb, 0u, 4u, vertex_buffers, offsets);

@@ -27,15 +27,10 @@ struct LoadedChunk {
     Geometry from;
     Geometry to;
 
-    // The chunk's OTHER vertex buffer — its ping-pong partner, not currently referenced by `to`.
-    // A chunk's vertex count never changes after first load (grid size is fixed), so instead of
-    // freeing and recreating a vertex buffer on every regeneration, updateLoadedChunks alternates
-    // writing new positions/normals data between exactly two persistent buffers, swapping which one
-    // is `to` each time — the same buffer just gets reused forever, no allocation after the first.
-    // VK_NULL_HANDLE until this chunk's first-ever regeneration (its second buffer is allocated
-    // lazily then, since a chunk that's evicted before ever regenerating never needs one at all).
-    // While blending (`from` valid), this field duplicates `from.vertexBuffer` — the buffer that
-    // will become the true idle spare once the blend completes.
+    // The chunk's other persistent vertex buffer — its ping-pong partner to `to`. A chunk's vertex
+    // count is fixed after first load, so regeneration alternates writing into these two buffers
+    // instead of allocating a new one each time. VK_NULL_HANDLE until the chunk's first
+    // regeneration (allocated lazily then). While blending, duplicates `from.vertexBuffer`.
     VkBuffer idleVertexBuffer = VK_NULL_HANDLE;
 
     double blendStartTime;
@@ -49,17 +44,15 @@ struct LoadedChunk {
 
 /*!
  *	A chunk's GPU geometry that's no longer referenced by `loadedChunks` (evicted — a finished
- *	blend's `from` destroys nothing at all; see LoadedChunk::idleVertexBuffer), queued for actual
- *	destruction rather than freed immediately. Destroying it while
- *	still referenced by an already-submitted command buffer would be a GPU-side use-after-free; the
- *	naive guard is a synchronous `vkDeviceWaitIdle` before every destroy, but that drains the entire
- *	GPU pipeline and is expensive enough on its own to cause a visible stutter (measured live: ~30ms
- *	for one such call). Instead, `callsRemaining` (decremented once per updateLoadedChunks call, freed
- *	once it reaches 0) leans on this app's own per-frame fence wait (`vklWaitForNextSwapchainImage()`,
- *	called once between every pair of updateLoadedChunks calls): with `CONCURRENT_FRAMES == 1` in
- *	VulkanLaunchpad.cpp, that fence wait alone already guarantees the GPU has finished the previous
- *	command buffer by the next updateLoadedChunks call, so no extra wait is needed at all — the same
- *	pattern VulkanLaunchpad.cpp itself uses for retiring hot-reloaded pipelines (`mPipelineGraveyard`).
+ *	blend's `from` destroys nothing; see LoadedChunk::idleVertexBuffer), queued for actual
+ *	destruction rather than freed immediately. Destroying it while still referenced by an
+ *	already-submitted command buffer would be a GPU-side use-after-free; a `vkDeviceWaitIdle` before
+ *	every destroy would guard against that but drains the entire GPU pipeline (measured live: ~30ms
+ *	per call). Instead, `callsRemaining` (decremented once per updateLoadedChunks call, freed at 0)
+ *	relies on the per-frame fence wait (`vklWaitForNextSwapchainImage()`) that already runs between
+ *	every pair of updateLoadedChunks calls: with `CONCURRENT_FRAMES == 1` in VulkanLaunchpad.cpp,
+ *	that fence wait alone guarantees the previous command buffer has finished — the same pattern
+ *	VulkanLaunchpad.cpp itself uses for retiring hot-reloaded pipelines (`mPipelineGraveyard`).
  */
 struct PendingDestroy {
     Geometry geometry;
@@ -69,10 +62,8 @@ struct PendingDestroy {
 /*!
  *	Creates and uploads an index buffer. Called exactly once, ever, for the whole ChunkManager (see
  *	ChunkManager::sharedIndicesBuffer) — a chunk's triangle topology is a pure function of grid size
- *	alone (`gridSizeExponent`, fixed for the app's entire lifetime, never per-chunk or runtime
- *	adjustable), so EVERY chunk that ever loads produces byte-for-byte identical index data. One
- *	shared buffer serves every currently-loaded chunk simultaneously, forever — there's nothing
- *	chunk-specific about it at all.
+ *	alone (`gridSizeExponent`, fixed for the app's lifetime), so every chunk produces identical
+ *	index data and one shared buffer serves all of them.
  *
  *	@param	indices	The triangle index data to upload. Must not be empty.
  *	@return	A handle to the newly created, uploaded index buffer.
@@ -89,10 +80,9 @@ VkBuffer createAndUploadIndexBuffer(const std::vector<uint32_t>& indices);
 struct ChunkManager {
     TerrainParams baseParams;
 
-    // One index buffer, shared by every currently-loaded chunk — see createAndUploadIndexBuffer's
-    // doc for why this is correct (every chunk's topology is identical). Created lazily, once, the
-    // first time any chunk ever loads; VK_NULL_HANDLE until then. Never recreated or duplicated —
-    // only ever destroyed once, at cleanupChunkManager (app shutdown).
+    // One index buffer, shared by every currently-loaded chunk (see createAndUploadIndexBuffer).
+    // Created lazily on the first chunk load; VK_NULL_HANDLE until then. Freed once, at
+    // cleanupChunkManager.
     VkBuffer sharedIndicesBuffer = VK_NULL_HANDLE;
     uint32_t sharedNumberOfIndices = 0;
 
@@ -102,18 +92,15 @@ struct ChunkManager {
     double blendDuration = 2.0;
 
     // Caps how many pendingDestroys entries updateLoadedChunks actually frees (once their deferral
-    // has elapsed) in one call. A mass Hurst/reseed regeneration or a single chunk-border crossing
-    // can each make a whole ring/batch of chunks eligible for destruction at once, and each free is
-    // real GPU work; anything past the cap just waits one more call.
+    // has elapsed) in one call — a mass regeneration or chunk-border crossing can make a whole batch
+    // eligible for destruction at once, and each free is real GPU work.
     int maxDestroysPerFrame = 16;
 
     // Caps how many brand-new (never-before-loaded) chunks updateLoadedChunks uploads in one call —
-    // travelling fast enough (or a large view radius) can bring a whole ring of new chunks into range
-    // at once, and each upload is real, synchronous GPU work. A chunk left past the cap just stays
-    // queued for a later call; it has no blend to desync since a first-time load never blends (see
-    // LoadedChunk). Regeneration uploads (an already-loaded chunk starting a new blend, e.g. from a
-    // Hurst/reseed change) are deliberately left uncapped — that stutter is accepted as a tradeoff for
-    // not needing the batch-sync bookkeeping a regeneration cap would require to avoid desyncing blends.
+    // travelling fast (or a large view radius) can bring a whole ring of new chunks into range at
+    // once. A first-time load never blends (see LoadedChunk), so a chunk left past the cap has
+    // nothing to desync. Regeneration uploads are left uncapped, since capping those would need
+    // batch-sync bookkeeping to avoid desyncing blends.
     int maxUploadsPerFrame = 8;
 
     // Final, GPU-uploaded chunks, each with its own independent from/to blend state.
@@ -149,15 +136,12 @@ struct ChunkManager {
 /*!
  *	Call once per frame: advances chunk generation/upload/destroy around the camera, evicting
  *	anything more than (viewRadius + 1) chunks away. Uploads at most `maxUploadsPerFrame` newly-loaded
- *	chunks per call (regeneration uploads are uncapped, and — since a regeneration reuses a chunk's
- *	existing persistent buffers rather than allocating new ones once it's regenerated at least once
- *	before — cheap enough in steady state that they rarely need capping anyway; see
- *	LoadedChunk::idleVertexBuffer). An evicted chunk is queued in `pendingDestroys` rather than freed
- *	immediately (see that struct's doc for why); up to `maxDestroysPerFrame` eligible entries are
- *	actually freed per call. Also revisits any loaded
- *	chunk whose `missingNeighborMask` is nonzero: once a previously-missing neighbor has real data,
- *	that chunk's normals are re-derived in the background and its normals buffer patched in place
- *	once ready (see LoadedChunk::missingNeighborMask and pendingRenormals).
+ *	chunks per call (regeneration uploads are uncapped — see LoadedChunk::idleVertexBuffer for why
+ *	those stay cheap in steady state). An evicted chunk is queued in `pendingDestroys` rather than
+ *	freed immediately (see that struct's doc); up to `maxDestroysPerFrame` eligible entries are
+ *	actually freed per call. Also revisits any loaded chunk with a nonzero `missingNeighborMask`,
+ *	re-deriving its normals in the background once a previously-missing neighbor has real data (see
+ *	LoadedChunk::missingNeighborMask and pendingRenormals).
  *
  *	`currentTime` should be the same clock used when drawing (glfwGetTime()).
  */

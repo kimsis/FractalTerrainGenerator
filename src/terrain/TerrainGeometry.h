@@ -37,11 +37,9 @@ struct GeometryData {
  *	ChunkManager::LoadedChunk) rather than duplicated into every from/to Geometry.
  */
 struct Geometry {
-    // A handle to a single GPU buffer holding BOTH vertex positions (at byte offset 0) and vertex
-    // normals (at byte offset normalsOffset) — combined into one allocation so a Hurst/reseed
-    // regeneration costs one vkCreateBuffer/vkAllocateMemory call instead of two (see
-    // createAndUploadIntoGpuMemory). Bound twice in the draw call (once per offset) as separate
-    // vertex-input bindings.
+    // A handle to a single GPU buffer holding both vertex positions (at byte offset 0) and vertex
+    // normals (at byte offset normalsOffset) — one combined allocation instead of two separate
+    // ones. Bound twice in the draw call (once per offset) as separate vertex-input bindings.
     VkBuffer vertexBuffer;
 
     // Byte offset into vertexBuffer where normal data begins.
@@ -63,20 +61,17 @@ GeometryData generateTerrainGeometry(const TerrainParams& params);
  *
  * @param	geometry_data	The CPU-side geometry that shall be transferred into GPU-side buffers.
  *							Its positions and normals are combined into a single `vertexBuffer`
- *							allocation (see Geometry). `indices` is ignored — its buffer is created
- *							separately, once per chunk, by ChunkManager (see LoadedChunk::indicesBuffer).
+ *							allocation (see Geometry). `indices` is ignored — see
+ *							ChunkManager::createAndUploadIndexBuffer.
  * @return	A new Geometry instance containing a handle to the newly created GPU buffer.
  */
 Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data);
 
 /*!
- *	Overwrites an ALREADY-ALLOCATED vertexBuffer's positions+normals regions in place (same layout
- *	as createAndUploadIntoGpuMemory: positions at offset 0, normals at the returned offset) —
- *	no GPU allocation happens here at all. `vertexBuffer` must already be big enough to hold
- *	`geometry_data`'s positions+normals, which holds whenever it was originally sized for the same
- *	grid dimensions (a chunk's vertex count never changes after its first load — see ChunkManager's
- *	ping-pong `LoadedChunk::idleVertexBuffer`, the reason this function exists: reusing one of a
- *	chunk's two persistent vertex buffers on every regeneration instead of allocating a new one).
+ *	Overwrites an already-allocated vertexBuffer's positions+normals regions in place (same layout
+ *	as createAndUploadIntoGpuMemory) — no GPU allocation happens here. `vertexBuffer` must already
+ *	be big enough to hold `geometry_data`'s positions+normals, which holds whenever it was
+ *	originally sized for the same grid dimensions (see ChunkManager::LoadedChunk::idleVertexBuffer).
  *
  *	@param	vertexBuffer	An existing buffer, at least as large as this call will write into it.
  *	@param	geometry_data	The CPU-side geometry to overwrite it with.
@@ -85,19 +80,16 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data);
 VkDeviceSize uploadVertexDataInPlace(VkBuffer vertexBuffer, const GeometryData& geometry_data);
 
 /*!
- *	Frees `geometry`'s vertex buffer, if it's non-null. Passing a VK_NULL_HANDLE `vertexBuffer` is
- *	explicitly safe (a no-op) — used when wrapping a chunk-level buffer that legitimately might not
- *	have been allocated yet (see ChunkManager::LoadedChunk::idleVertexBuffer). Note this only
- *	destroys the vertex buffer — a chunk's index buffer (see ChunkManager::createAndUploadIndexBuffer)
- *	must be freed separately (also via this function, wrapped in a throwaway Geometry — see ChunkManager).
+ *	Frees `geometry`'s vertex buffer, if it's non-null. A VK_NULL_HANDLE `vertexBuffer` is
+ *	explicitly safe (a no-op) — see ChunkManager::LoadedChunk::idleVertexBuffer. Only destroys the
+ *	vertex buffer — a chunk's index buffer (see ChunkManager::createAndUploadIndexBuffer) is freed
+ *	separately, also via this function, wrapped in a throwaway Geometry.
  */
 void destroyGeometryGpuMemory(const Geometry& geometry);
 
 /*!
- *	Overwrites an already-uploaded Geometry's normals region (within its combined vertexBuffer,
- *	at normalsOffset) in place, leaving positions untouched. Used to patch previously-extrapolated
- *	edge normals once a neighboring chunk's real data becomes available (see ChunkManager) — a
- *	chunk's positions never change after generation, so only its normals ever need updating
- *	post-upload.
+ *	Overwrites an already-uploaded Geometry's normals region in place, leaving positions untouched.
+ *	Used to patch previously-extrapolated edge normals once a neighboring chunk's real data becomes
+ *	available (see ChunkManager).
  */
 void updateGeometryNormals(const Geometry& geometry, const std::vector<glm::vec3>& normals);

@@ -54,8 +54,7 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data) {
     Geometry result;
 
     // Positions and normals combined into one buffer/allocation — positions at offset 0, normals
-    // right after (aligned) — so this costs one vkCreateBuffer/vkAllocateMemory call instead of
-    // two.
+    // right after (aligned).
     size_t positions_buffer_byte_size = geometry_data.positions.size() * sizeof(geometry_data.positions[0]);
     size_t normals_buffer_byte_size = geometry_data.normals.size() * sizeof(geometry_data.normals[0]);
     VkDeviceSize normals_offset = alignUp(static_cast<VkDeviceSize>(positions_buffer_byte_size), kVertexSubBufferAlignment);
@@ -69,10 +68,8 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data) {
 }
 
 void destroyGeometryGpuMemory(const Geometry& geometry) {
-    // A VK_NULL_HANDLE vertexBuffer is explicitly safe to pass here (a no-op) — see
-    // ChunkManager::LoadedChunk::idleVertexBuffer, which can legitimately still be null.
-    // vklDestroyHostCoherentBufferAndItsBackingMemory itself errors out on a null handle, so it
-    // must be skipped explicitly rather than passed through unconditionally.
+    // vklDestroyHostCoherentBufferAndItsBackingMemory errors out on a null handle, so a legitimately
+    // null vertexBuffer (see ChunkManager::LoadedChunk::idleVertexBuffer) must be skipped explicitly.
     if (geometry.vertexBuffer != VK_NULL_HANDLE) {
         vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.vertexBuffer);
     }
