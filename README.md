@@ -1,4 +1,4 @@
-https://github.com/kimsis/FractalTerrainGenerator/releases/tag/v1.0.0
+![GitHub release](https://github.com/kimsis/FractalTerrainGenerator/releases/tag/v1.0.0)
 
 # Fractal Terrain Generator :mountain:
 
