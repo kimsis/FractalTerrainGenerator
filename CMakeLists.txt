@@ -57,6 +57,12 @@ add_executable(${PROJECT_NAME}
     src/utils/VulkanSetup.h
     src/utils/VulkanSetup.cpp
     src/utils/MathUtils.h
+    src/utils/RandomUtils.h
+    src/utils/RandomUtils.cpp
+    src/gui/ImGuiUtils.h
+    src/gui/ImGuiUtils.cpp
+    src/gui/LoadingScreen.h
+    src/gui/LoadingScreen.cpp
     src/camera/Camera.cpp
     src/terrain/TerrainGeometry.h
     src/terrain/TerrainGeometry.cpp

@@ -1,10 +1,3 @@
-/*
- * Copyright 2023 TU Wien, Institute of Visual Computing & Human-Centered Technology.
- * This file is part of the GCG Lab Framework and must not be redistributed.
- *
- * Original version created by Lukas Gersthofer and Bernhard Steiner.
- * Vulkan edition created by Johannes Unterguggenberger (junt@cg.tuwien.ac.at).
- */
 // vulkan/vulkan.h must come before GLFW/glfw3.h and VulkanLaunchpad.h below — neither of those
 // headers includes it themselves, they just assume the includer already did.
 #include <vulkan/vulkan.h>
@@ -28,6 +21,8 @@
 
 #include "algorithms/DiamondSquareGenerator.h"
 #include "camera/Camera.h"
+#include "gui/ImGuiUtils.h"
+#include "gui/LoadingScreen.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
@@ -39,6 +34,7 @@
 #include "utils/AppSettings.h"
 #include "utils/INIReader.h"
 #include "utils/PathUtils.h"
+#include "utils/RandomUtils.h"
 #include "utils/VulkanSetup.h"
 #include "water/WaterGeometry.h"
 #include "water/WaterScene.h"
@@ -86,20 +82,6 @@ TerrainScene setupTerrainScene(
 );
 
 /*!
- *	Builds a minimal ImGui panel shown while the initial chunks are generating, before the real
- *	terrain scene's own controls exist yet.
- */
-void buildLoadingGUI(size_t pendingChunkCount);
-
-/*!
- *	Blocks until every chunk in the initial (2 * viewRadius + 1)^2 window around cameraPos has been
- *	generated and uploaded, while keeping the window responsive (polling events and drawing a
- *	loading screen) for however long that takes. Use this once, at startup, before the main render
- *	loop begins — per-frame streaming (updateLoadedChunks) takes over from there.
- */
-void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& chunkManager, const glm::vec3& cameraPos);
-
-/*!
  *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
  *	mouse button input that can be processed by our application.
  */
@@ -143,14 +125,6 @@ void handleCameraToggleRequest(
 );
 
 /*!
- *	Draws a fresh uint32_t seed from a properly-seeded std::mt19937, spanning the full uint32_t range.
- */
-uint32_t generateRandomSeed();
-float generateRandomHurst();
-float generateRandomHeightScale();
-float generateRandomWaterLevel();
-
-/*!
  *	Applies any pending reseed/Hurst-change/demo-mode change to the terrain scene for this frame:
  *	starts a regeneration when needed (guarded by isRegenerating(), same as the GUI's own guard),
  *	advances demo mode's height-scale/water-level drift, and applies a pending view-radius change.
@@ -174,17 +148,6 @@ void applyCameraInput(
     double& mouse_y_last,
     float dt
 );
-
-/*!
- *	Prints `label`, then positions the cursor so the widget that follows always ends flush with the
- *	right edge, `widget_width` wide, regardless of the label's own width — instead of its position (or,
- *	for non-input widgets like Button that ignore SetNextItemWidth, its right edge) drifting depending
- *	on how long each row's label happens to be. Pass kSliderWidth for sliders/inputs; for a Button, pass
- *	its own natural size (ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f) so the
- *	button's actual right edge — not just where a kSliderWidth-wide widget would have started — lands at
- *	the true right edge.
- */
-void labelThenRightAlignedWidget(const char* label, float widget_width);
 
 /*!
  * Builds the ImGUI Sidebar
@@ -731,43 +694,6 @@ TerrainScene setupTerrainScene(
     return scene;
 }
 
-void buildLoadingGUI(size_t pendingChunkCount) {
-    const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(main_viewport->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::Begin(
-        "Loading",
-        nullptr,
-        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove
-    );
-    ImGui::Text("Generating terrain... (%zu chunks remaining)", pendingChunkCount);
-    ImGui::End();
-}
-
-static size_t chunksStillGenerating(const ChunkManager& chunkManager) {
-    return chunkManager.pendingChunks.size() + chunkManager.readyForNormals.size() + chunkManager.pendingNormals.size();
-}
-
-void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& chunkManager, const glm::vec3& cameraPos) {
-    updateLoadedChunks(chunkManager, cameraPos, glfwGetTime());
-    while (chunksStillGenerating(chunkManager) > 0) {
-        glfwPollEvents();
-
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-        buildLoadingGUI(chunksStillGenerating(chunkManager));
-        ImGui::Render();
-
-        vklWaitForNextSwapchainImage();
-        vklStartRecordingCommands();
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
-        vklEndRecordingCommands();
-        vklPresentCurrentSwapchainImage();
-
-        updateLoadedChunks(chunkManager, cameraPos, glfwGetTime());
-    }
-}
-
 /*!
  *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
  *	mouse button input that can be processed by our application.
@@ -866,34 +792,6 @@ void handleCameraToggleRequest(
     glfwGetCursorPos(window, &mouse_x, &mouse_y);
     mouse_x_last = mouse_x;
     mouse_y_last = mouse_y;
-}
-
-uint32_t generateRandomSeed() {
-    static std::mt19937 rng(std::random_device{}());
-    static std::uniform_int_distribution<uint32_t> dist;
-    return dist(rng);
-}
-
-// Inset from the slider's full [0,1] range to avoid the visually-degenerate extremes (near-flat at
-// 1, near-white-noise at 0).
-float generateRandomHurst() {
-    static std::mt19937 rng(std::random_device{}());
-    static std::uniform_real_distribution<float> dist(0.4f, 0.95f);
-    return dist(rng);
-}
-
-float generateRandomHeightScale() {
-    static std::mt19937 rng(std::random_device{}());
-    static std::uniform_real_distribution<float> dist(1.0f, 5.0f);
-    return dist(rng);
-}
-
-// Inset from the slider's full [-25, 25] range — comfortably varied without drifting the water
-// plane absurdly far from where the terrain actually sits.
-float generateRandomWaterLevel() {
-    static std::mt19937 rng(std::random_device{}());
-    static std::uniform_real_distribution<float> dist(-15.0f, 15.0f);
-    return dist(rng);
 }
 
 void updateTerrainState(TerrainScene& terrain_scene, double currentFrameTime) {
@@ -1011,16 +909,6 @@ void applyCameraInput(
 
     mouse_x_last = mouse_x;
     mouse_y_last = mouse_y;
-}
-
-void labelThenRightAlignedWidget(const char* label, float widget_width) {
-    ImGui::Spacing();
-    float right_edge_x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-    ImGui::AlignTextToFramePadding();
-    ImGui::Text("%s", label);
-    ImGui::SameLine();
-    ImGui::SetCursorPosX(right_edge_x - widget_width);
-    ImGui::SetNextItemWidth(widget_width);
 }
 
 void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::vec3& cameraForward) {
