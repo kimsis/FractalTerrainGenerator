@@ -1189,4 +1189,3 @@ void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scen
         vkCmdDrawIndexed(cb, geometry.numberOfIndices, 1u, 0u, 0u, 0u);
     }
 }
-

@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "../Camera/Camera.h"
+#include "../camera/Camera.h"
 
 /*!
  *	Everything recreateSwapchainAndDependents needs that stays fixed for the whole render loop —
