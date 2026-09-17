@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Packages a distributable .zip containing everything the app actually needs at runtime — the
-# Release executable, the 4 shader files, the 3 settings .ini files it loads, and imgui.ini — into
-# the repo root. See docs/PLAN.md or ask Claude for the full breakdown of why exactly these files
-# and not the rest of assets/ (mostly dead leftovers from the original demo scene).
+# Release executable, the 4 shader files, the single consolidated settings.ini, and imgui.ini —
+# into the repo root. See docs/PLAN.md or ask Claude for the full breakdown of why exactly these
+# files and not the rest of assets/ (mostly dead leftovers from the original demo scene).
 #
 # Requires a bash environment (e.g. Git Bash/MSYS2/WSL on Windows) and a `zip` binary. Git for
 # Windows' bundled bash does NOT include `zip` by default — install it separately (e.g. via MSYS2's
@@ -76,11 +76,9 @@ for f in terrain.vert terrain.frag water.vert water.frag; do
     cp "$src" "$PKG_DIR/assets/shaders/"
 done
 
-for f in window.ini camera_terrain.ini renderer_standard.ini; do
-    src="$REPO_ROOT/assets/settings/$f"
-    [ -f "$src" ] || { echo "Error: missing $src" >&2; exit 1; }
-    cp "$src" "$PKG_DIR/assets/settings/"
-done
+settings_src="$REPO_ROOT/assets/settings/settings.ini"
+[ -f "$settings_src" ] || { echo "Error: missing $settings_src" >&2; exit 1; }
+cp "$settings_src" "$PKG_DIR/assets/settings/"
 
 if [ -f "$REPO_ROOT/imgui.ini" ]; then
     cp "$REPO_ROOT/imgui.ini" "$PKG_DIR/"

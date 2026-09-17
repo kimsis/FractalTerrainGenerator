@@ -73,7 +73,6 @@ class Camera {
 
 class TrackballCamera : public Camera {
    public:
-    static constexpr float kScrollSensitivity = 0.5f;
     static constexpr float kPanSensitivity = 0.01f;
     using Camera::Camera;
 

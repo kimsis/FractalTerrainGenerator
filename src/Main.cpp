@@ -43,31 +43,11 @@
 #undef min
 #undef max
 
-constexpr char WELCOME_MSG[] = ":::::: WELCOME TO GCG 2025 ::::::";
-constexpr char WINDOW_TITLE[] = "GCG 2025";
-
-constexpr float BACKGROUND_R = 0.14f;
-constexpr float BACKGROUND_G = 0.4f;
-constexpr float BACKGROUND_B = 0.37f;
-
-constexpr glm::vec4 DIRLIGHT_COLOR = glm::vec4(0.85f, 0.85f, 0.85f, 0.0f);
-constexpr glm::vec4 DIRLIGHT_DIR = glm::vec4(0.0f, 1.0f, -1.0f, 0.0f);
-
-constexpr float CORNELL_KA = 0.1f;
-constexpr float CORNELL_KD = 0.9f;
-constexpr float CORNELL_KS = 0.3f;
-constexpr float CORNELL_ALPHA = 10.0f;
-
-// Height-based terrain color gradient (dirt -> grass -> rock), in world units above waterLevel.
-// Compares directly against final rendered height, so it doesn't stretch with heightScale.
-constexpr float DIRT_TO_GRASS_HEIGHT_OFFSET = 3.0f;
-constexpr float GRASS_TO_ROCK_HEIGHT_OFFSET = 10.0f;
-constexpr float HEIGHT_COLOR_TRANSITION_BAND = 2.0f;
-
-// Small upward nudge on the water plane's Z, avoiding z-fighting with near-shore terrain (this
-// framework forces depth test/write on for every pipeline, water's included, with no way to disable
-// it). Small enough to be visually unnoticeable as a change in water level.
-constexpr float WATER_DEPTH_BIAS = 0.05f;
+/* ------------------------------------------------ */
+// Constants
+/* ------------------------------------------------ */
+constexpr char WELCOME_MSG[] = ":::::: WELCOME TO MY TERRAIN GENERATOR ::::::";
+constexpr char WINDOW_TITLE[] = "Fractal Terrain Generator";
 
 constexpr size_t POLYMODES = 2;
 constexpr size_t CULLMODES = 3;
@@ -77,9 +57,152 @@ constexpr VkCullModeFlags kTerrainCullModes[CULLMODES] = {VK_CULL_MODE_NONE, VK_
 /*! Fixed width every GUI slider is drawn at, used by labelThenRightAlignedWidget. */
 constexpr float kSliderWidth = 200.0f;
 
-static ImGuiSliderFlags flags = ImGuiSliderFlags_None;
-ImGuiWindowFlags window_flags = 0;
-bool g_panel_open = true;
+/* ------------------------------------------------ */
+// Data Structures
+/* ------------------------------------------------ */
+/*!
+ *	It matches the definition and sizes of the corresponding GPU-side struct exactly, which is used in shaders.
+ */
+struct UniformBufferVert {
+    /*! Storage for the model matrix, consisting of 16 float values (inherently aligned to 16 bytes) */
+    glm::mat4 modelMatrix;
+
+    /*! Storage for the model matrix suitable for normals transformation, consisting of 16 float values (inherently aligned to 16 bytes) */
+    glm::mat4 modelMatrixForNormals;
+
+    /*! Storage for the view-projection matrix, consisting of 16 float values (inherently aligned to 16 bytes) */
+    glm::mat4 viewProjMatrix;
+};
+
+/*!
+ *	Per-chunk blend state for terrain.vert, pushed via vkCmdPushConstants immediately before each
+ *	chunk's draw call — a uniform buffer can't hold a different value per draw call within one
+ *	frame, since all of a frame's host writes to it land before the GPU executes any of that
+ *	frame's draws.
+ */
+struct TerrainPushConstants {
+    /*! 0-1 blend progress between this chunk's `from` and `to` geometry. */
+    float blendFactor;
+
+    /*! Whether this chunk is currently blending (`from` is valid). */
+    uint32_t isBlending;
+};
+
+struct UniformBufferFrag {
+    /*! Storage for the camera's world space position (aligned to 16 bytes) */
+    glm::vec4 cameraPosition;
+
+    /*! Illumination properties ka, kd, ks, alpha (in that order)
+     *	First three are material coefficients, the last one is specular alpha. */
+    glm::vec4 materialProperties;
+
+    /*! Debug visualization toggles: x = drawNormals (N), y = highlightChunkBorders (F3). */
+    glm::uvec2 debugToggles;
+
+    /*! Whether the camera is below the water plane; drives the underwater tint in terrain.frag. */
+    uint32_t isUnderwater;
+
+    /*! World-space width of one terrain chunk, for the chunk-border-highlight distance check. */
+    float chunkWidth;
+
+    /*! Surface roughness in [0, 1]: 0 is sharp/shiny, 1 is broad/matte. See buildGUI's slider. */
+    float roughness;
+
+    /*! World-space heights (not scaled by heightScale) where the height-based color gradient
+     *	transitions dirt->grass and grass->rock. See g_dirt_to_grass_height_offset/g_grass_to_rock_height_offset. */
+    float dirtToGrassHeight;
+    float grassToRockHeight;
+
+    /*! Half-width of each color transition above, same units as dirtToGrassHeight. */
+    float heightColorTransitionBand;
+};
+
+/*!
+ *	Matches water.vert's uniform block exactly. No fragment-stage uniforms are needed since
+ *	water.frag uses a fixed color.
+ */
+struct UniformBufferWaterVert {
+    glm::mat4 modelMatrix;
+    glm::mat4 viewProjMatrix;
+};
+
+/*!
+ *	This struct contains the data of a directional light.
+ *	It matches the definition and sizes of the corresponding GPU-side struct exactly, which is used in shaders.
+ */
+struct DirectionalLight {
+    /*! Light color of this light source */
+    glm::vec4 color;
+
+    /*! Light direction of this directional light source */
+    glm::vec4 direction;
+};
+
+/*!
+ *	This struct contains the data of a point light.
+ *	It matches the definition and sizes of the corresponding GPU-side struct exactly, which is used in shaders.
+ */
+struct PointLight {
+    /*! Light color of this light source */
+    glm::vec4 color;
+
+    /*! Position of this light source in world space */
+    glm::vec4 position;
+
+    /*! Attenuation properties of this light source */
+    glm::vec4 attenuation;
+};
+
+/*!
+ *	Holds every GPU resource (pipelines, geometries, uniform buffers, descriptor sets, textures)
+ *	that make up the terrain scene (Terrain + dir light).
+ */
+struct TerrainScene {
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkDescriptorPool descriptor_pool;
+    /*! Pipelines are built lazily, on first use of each (polygon mode, cull mode) combination. */
+    VkPipeline pipelines[POLYMODES][CULLMODES];
+    std::string vertexShaderPath;
+    std::string fragmentShaderPath;
+    std::vector<VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings;
+
+    VkBuffer ub_dirlight;
+
+    VkBuffer ub_terrain_vert;
+    VkBuffer ub_terrain_frag;
+    VkDescriptorSet ds_terrain;
+
+    ChunkManager chunkManager;
+
+    float heightScale;
+    float waterLevel;
+    float roughness;
+};
+
+/*!
+ * A raycast hit result.
+ */
+struct Hit {
+    glm::vec3 point;
+    float distance;
+};
+
+/*!
+ *	Holds every GPU resource that makes up the water plane: one pipeline/descriptor set/uniform
+ *	buffer shared by all chunks, and one small baked quad per currently-loaded terrain chunk.
+ */
+struct WaterScene {
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkDescriptorPool descriptor_pool;
+    VkPipeline pipeline;
+    std::string vertexShaderPath;
+    std::string fragmentShaderPath;
+
+    VkBuffer ub_water_vert;
+    VkDescriptorSet ds_water;
+
+    std::unordered_map<ChunkCoord, WaterChunkGeometry> chunkGeometry;
+};
 
 /* --------------------------------------------- */
 // Helper Function Declarations
@@ -181,149 +304,6 @@ VkSurfaceFormatKHR getSurfaceImageFormat(VkPhysicalDevice physical_device, VkSur
  */
 VkSurfaceTransformFlagBitsKHR getSurfaceTransform(VkPhysicalDevice physical_device, VkSurfaceKHR surface);
 
-/*!
- *	It matches the definition and sizes of the corresponding GPU-side struct exactly, which is used in shaders.
- */
-struct UniformBufferVert {
-    /*! Storage for the model matrix, consisting of 16 float values (inherently aligned to 16 bytes) */
-    glm::mat4 modelMatrix;
-
-    /*! Storage for the model matrix suitable for normals transformation, consisting of 16 float values (inherently aligned to 16 bytes) */
-    glm::mat4 modelMatrixForNormals;
-
-    /*! Storage for the view-projection matrix, consisting of 16 float values (inherently aligned to 16 bytes) */
-    glm::mat4 viewProjMatrix;
-};
-
-/*!
- *	Per-chunk blend state for terrain.vert, pushed via vkCmdPushConstants immediately before each
- *	chunk's draw call — a uniform buffer can't hold a different value per draw call within one
- *	frame, since all of a frame's host writes to it land before the GPU executes any of that
- *	frame's draws.
- */
-struct TerrainPushConstants {
-    /*! 0-1 blend progress between this chunk's `from` and `to` geometry. */
-    float blendFactor;
-
-    /*! Whether this chunk is currently blending (`from` is valid). */
-    uint32_t isBlending;
-};
-
-struct UniformBufferFrag {
-    /*! Storage for the camera's world space position (aligned to 16 bytes) */
-    glm::vec4 cameraPosition;
-
-    /*! Illumination properties ka, kd, ks, alpha (in that order)
-     *	First three are material coefficients, the last one is specular alpha. */
-    glm::vec4 materialProperties;
-
-    /*! Debug visualization toggles: x = drawNormals (N), y = highlightChunkBorders (F3). */
-    glm::uvec2 debugToggles;
-
-    /*! Whether the camera is below the water plane; drives the underwater tint in terrain.frag. */
-    uint32_t isUnderwater;
-
-    /*! World-space width of one terrain chunk, for the chunk-border-highlight distance check. */
-    float chunkWidth;
-
-    /*! Surface roughness in [0, 1]: 0 is sharp/shiny, 1 is broad/matte. See buildGUI's slider. */
-    float roughness;
-
-    /*! World-space heights (not scaled by heightScale) where the height-based color gradient
-     *	transitions dirt->grass and grass->rock. See DIRT_TO_GRASS_HEIGHT_OFFSET/GRASS_TO_ROCK_HEIGHT_OFFSET. */
-    float dirtToGrassHeight;
-    float grassToRockHeight;
-
-    /*! Half-width of each color transition above, same units as dirtToGrassHeight. */
-    float heightColorTransitionBand;
-};
-
-/*!
- *	Matches water.vert's uniform block exactly. No fragment-stage uniforms are needed since
- *	water.frag uses a fixed color.
- */
-struct UniformBufferWaterVert {
-    glm::mat4 modelMatrix;
-    glm::mat4 viewProjMatrix;
-};
-
-/*!
- *	This struct contains the data of a directional light.
- *	It matches the definition and sizes of the corresponding GPU-side struct exactly, which is used in shaders.
- */
-struct DirectionalLight {
-    /*! Light color of this light source */
-    glm::vec4 color;
-
-    /*! Light direction of this directional light source */
-    glm::vec4 direction;
-};
-
-/*!
- *	This struct contains the data of a point light.
- *	It matches the definition and sizes of the corresponding GPU-side struct exactly, which is used in shaders.
- */
-struct PointLight {
-    /*! Light color of this light source */
-    glm::vec4 color;
-
-    /*! Position of this light source in world space */
-    glm::vec4 position;
-
-    /*! Attenuation properties of this light source */
-    glm::vec4 attenuation;
-};
-
-/*!
- *	Holds every GPU resource (pipelines, geometries, uniform buffers, descriptor sets, textures)
- *	that make up the terrain scene (Terrain + dir light).
- */
-struct TerrainScene {
-    VkDescriptorSetLayout descriptor_set_layout;
-    VkDescriptorPool descriptor_pool;
-    /*! Pipelines are built lazily, on first use of each (polygon mode, cull mode) combination. */
-    VkPipeline pipelines[POLYMODES][CULLMODES];
-    std::string vertexShaderPath;
-    std::string fragmentShaderPath;
-    std::vector<VkDescriptorSetLayoutBinding> descriptorSetLayoutBindings;
-
-    VkBuffer ub_dirlight;
-
-    VkBuffer ub_terrain_vert;
-    VkBuffer ub_terrain_frag;
-    VkDescriptorSet ds_terrain;
-
-    ChunkManager chunkManager;
-
-    float heightScale;
-    float waterLevel;
-    float roughness;
-};
-
-/*!
- * A raycast hit result.
- */
-struct Hit {
-    glm::vec3 point;
-    float distance;
-};
-
-/*!
- *	Holds every GPU resource that makes up the water plane: one pipeline/descriptor set/uniform
- *	buffer shared by all chunks, and one small baked quad per currently-loaded terrain chunk.
- */
-struct WaterScene {
-    VkDescriptorSetLayout descriptor_set_layout;
-    VkDescriptorPool descriptor_pool;
-    VkPipeline pipeline;
-    std::string vertexShaderPath;
-    std::string fragmentShaderPath;
-
-    VkBuffer ub_water_vert;
-    VkDescriptorSet ds_water;
-
-    std::unordered_map<ChunkCoord, WaterChunkGeometry> chunkGeometry;
-};
 
 /*!
  *	Allocates a new descriptor set of the given layout from the given descriptor pool.
@@ -437,7 +417,15 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
  *	drawn with, and configures the scene's ChunkManager from params. Chunk geometry itself is
  *	generated/uploaded on demand, driven by the camera — not by this one-time setup call.
  */
-TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, TerrainParams& params);
+TerrainScene setupTerrainScene(
+    VkDevice vk_device,
+    VkQueue vk_queue,
+    uint32_t selected_queue_family_index,
+    TerrainParams& params,
+    float initial_height_scale,
+    float initial_roughness,
+    float initial_water_level
+);
 
 /*!
  *	Kicks off terrain generation for the given params on a background thread and returns immediately
@@ -481,6 +469,7 @@ void labelThenRightAlignedWidget(const char* label, float widget_width);
 uint32_t generateRandomSeed();
 float generateRandomHurst();
 float generateRandomHeightScale();
+float generateRandomWaterLevel();
 
 /*!
  * Builds the ImGUI Sidebar
@@ -524,11 +513,28 @@ void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scen
  */
 void cleanupWaterScene(VkDevice vk_device, WaterScene& scene);
 
+/* ------------------------------------------------ */
+// Global State
+/* ------------------------------------------------ */
+
+// --- GUI chrome ---
+static ImGuiSliderFlags flags = ImGuiSliderFlags_None;
+ImGuiWindowFlags window_flags = 0;
+bool g_panel_open = true;
+static bool g_framebuffer_resized = false;
+
+// --- Camera / input ---
 static bool g_dragging = false;
 static bool g_strafing = false;
 static float g_scroll_delta = 0.0f;
-static bool g_framebuffer_resized = false;
+static bool g_toggle_camera = false;
+static bool g_toggle_camera_requested = false;
+static float g_camera_speed = 5.0f;
+// Input feel, one-time startup values (settings.ini's [camera] section).
+static float g_mouse_sensitivity = 0.005f;
+static float g_scroll_sensitivity = 0.5f;
 
+// --- Rendering toggles ---
 /*!
  *	0 ... fill polygons
  *	1 ... wireframe mode
@@ -544,22 +550,49 @@ static int g_culling_index = 0;
 
 static bool g_draw_normals = false;
 static bool g_highlight_chunk_borders = false;
-static bool g_toggle_camera = false;
-static bool g_toggle_camera_requested = false;
-static bool g_reseed_requested = false;
-static float g_camera_speed = 5.0f;
-static int g_chunk_view_radius = 8;
-static bool g_chunk_view_radius_changed = false;
+
+// --- Terrain GUI sliders (live-adjustable; see buildGUI) ---
 static float g_hurst = 0.8f;
 static bool g_hurst_changed = false;
-// Demo mode (F4): keeps re-randomizing Hurst/seed, one right after the previous blend settles, so
-// the terrain keeps morphing on its own while flying around for a recording.
+static bool g_reseed_requested = false;
+static int g_chunk_view_radius = 16;
+static bool g_chunk_view_radius_changed = false;
+
+// --- Demo mode (F4): keeps re-randomizing Hurst/seed, one right after the previous blend
+// settles, so the terrain keeps morphing on its own while flying around for a recording.
 static bool g_demo_mode = false;
-// Demo mode's height-scale drift: negative is a sentinel meaning "not started yet".
+// Height-scale drift: negative is a sentinel meaning "not started yet".
 static double g_demo_height_interp_start_time = -1.0;
 static float g_demo_height_start = 1.0f;
 static float g_demo_height_target = 1.0f;
+// Water-level drift: same pattern as height-scale above, its own independent timer.
+static double g_demo_water_interp_start_time = -1.0;
+static float g_demo_water_start = 0.0f;
+static float g_demo_water_target = 0.0f;
+// How long the drifts above take to reach each newly picked target.
+static double g_demo_height_interp_duration = 1.0;
+static double g_demo_water_interp_duration = 1.0;
 
+// --- Directional light, terrain material, and color-gradient/water-offset settings — all
+// one-time startup values (settings.ini's [terrain]/[light] sections), not GUI-adjustable.
+static glm::vec3 g_dirlight_color = glm::vec3(0.85f, 0.85f, 0.85f);
+static glm::vec3 g_dirlight_dir = glm::vec3(0.0f, 1.0f, -1.0f);
+static float g_terrain_ka = 0.1f;
+static float g_terrain_kd = 0.9f;
+static float g_terrain_ks = 0.3f;
+static float g_terrain_alpha = 10.0f;
+static float g_dirt_to_grass_height_offset = 3.0f;
+static float g_grass_to_rock_height_offset = 10.0f;
+static float g_height_color_transition_band = 2.0f;
+static float g_water_depth_bias = 0.05f;
+
+// --- ChunkManager tuning, also one-time startup values (see ChunkManager.h for what each
+// controls).
+static double g_blend_duration = 2.0;
+static int g_max_destroys_per_frame = 16;
+static int g_max_uploads_per_frame = 8;
+
+// --- Vulkan/sync internals ---
 /*!
  *	A flag that will be set during initialization code.
  *	If set to true, it will indicate that Synchronization2 is supported and can be used.
@@ -584,40 +617,81 @@ int main() {
     // Load Settings From File
     /* --------------------------------------------- */
 
+    // Every startup default lives in one file now — one-time settings (window/camera/renderer)
+    // and GUI sliders' starting values (terrain/chunks) alike.
+    INIReader settings_reader("assets/settings/settings.ini");
+
     int window_width = 800;
     int window_height = 800;
-    std::string window_title = "Task 0";
-    INIReader window_reader("assets/settings/window.ini");
+    std::string window_title = settings_reader.Get("window", "title", WINDOW_TITLE);
 
-    window_title = window_reader.Get("window", "title", WINDOW_TITLE);
-    std::string init_camera_filepath = "assets/settings/camera_terrain.ini";
-    INIReader camera_reader(init_camera_filepath);
-
-    float field_of_view = static_cast<float>(camera_reader.GetReal("camera", "fov", 60.0f));
-    float near_plane_distance = static_cast<float>(camera_reader.GetReal("camera", "near", 0.1f));
-    float far_plane_distance = static_cast<float>(camera_reader.GetReal("camera", "far", 100.0f));
+    float field_of_view = static_cast<float>(settings_reader.GetReal("camera", "fov", 60.0f));
+    float near_plane_distance = static_cast<float>(settings_reader.GetReal("camera", "near", 0.1f));
+    float far_plane_distance = static_cast<float>(settings_reader.GetReal("camera", "far", 100.0f));
     float aspect_ratio = static_cast<float>(window_width) / static_cast<float>(window_height);
     glm::vec3 camera_position(
-        static_cast<float>(camera_reader.GetReal("camera", "position_x", 0.0f)),
-        static_cast<float>(camera_reader.GetReal("camera", "position_y", 0.0f)),
-        static_cast<float>(camera_reader.GetReal("camera", "position_z", 0.0f))
+        static_cast<float>(settings_reader.GetReal("camera", "position_x", 0.0f)),
+        static_cast<float>(settings_reader.GetReal("camera", "position_y", 0.0f)),
+        static_cast<float>(settings_reader.GetReal("camera", "position_z", 0.0f))
     );
     // Same convention as the live fly-camera controls: yaw/pitch = 0 looks along +X; positive
     // pitch looks up, negative looks down.
-    float camera_yaw = static_cast<float>(camera_reader.GetReal("camera", "yaw", 0.0f));
-    float camera_pitch = static_cast<float>(camera_reader.GetReal("camera", "pitch", 0.0f));
-    std::string init_renderer_filepath = "assets/settings/renderer_standard.ini";
-    INIReader renderer_reader(init_renderer_filepath);
-    bool as_wireframe = renderer_reader.GetBoolean("renderer", "wireframe", false);
+    float camera_yaw = static_cast<float>(settings_reader.GetReal("camera", "yaw", 0.0f));
+    float camera_pitch = static_cast<float>(settings_reader.GetReal("camera", "pitch", 0.0f));
+
+    bool as_wireframe = settings_reader.GetBoolean("renderer", "wireframe", false);
     if (as_wireframe) {
         g_polygon_mode_index = 1;
     }
-    bool with_backface_culling = renderer_reader.GetBoolean("renderer", "backface_culling", false);
+    bool with_backface_culling = settings_reader.GetBoolean("renderer", "backface_culling", false);
     if (with_backface_culling) {
         g_culling_index = 1;
     }
-    g_draw_normals = renderer_reader.GetBoolean("renderer", "normals", false);
-    bool depthtest = renderer_reader.GetBoolean("renderer", "depthtest", true);
+    g_draw_normals = settings_reader.GetBoolean("renderer", "normals", false);
+    bool depthtest = settings_reader.GetBoolean("renderer", "depthtest", true);
+    float background_r = static_cast<float>(settings_reader.GetReal("renderer", "background_r", 0.14));
+    float background_g = static_cast<float>(settings_reader.GetReal("renderer", "background_g", 0.4));
+    float background_b = static_cast<float>(settings_reader.GetReal("renderer", "background_b", 0.37));
+
+    // Initial values for the "Terrain Controls" GUI sliders — every one of them stays live-
+    // adjustable from the GUI afterward, this only affects what they start at.
+    float initial_hurst = static_cast<float>(settings_reader.GetReal("terrain", "hurst", 0.8));
+    uint32_t initial_seed = static_cast<uint32_t>(settings_reader.GetInteger("terrain", "seed", 1337));
+    int initial_grid_size_exponent = static_cast<int>(settings_reader.GetInteger("terrain", "grid_size_exponent", 4));
+    float initial_height_scale = static_cast<float>(settings_reader.GetReal("terrain", "height_scale", 1.0));
+    float initial_roughness = static_cast<float>(settings_reader.GetReal("terrain", "roughness", 0.6));
+    float initial_water_level = static_cast<float>(settings_reader.GetReal("terrain", "water_level", 2.0));
+    g_camera_speed = static_cast<float>(settings_reader.GetReal("camera", "speed", 5.0));
+    g_chunk_view_radius = static_cast<int>(settings_reader.GetInteger("chunks", "view_radius", 16));
+    g_mouse_sensitivity = static_cast<float>(settings_reader.GetReal("camera", "mouse_sensitivity", 0.005));
+    g_scroll_sensitivity = static_cast<float>(settings_reader.GetReal("camera", "scroll_sensitivity", 0.5));
+
+    g_dirlight_color = glm::vec3(
+        static_cast<float>(settings_reader.GetReal("light", "color_r", 0.85)),
+        static_cast<float>(settings_reader.GetReal("light", "color_g", 0.85)),
+        static_cast<float>(settings_reader.GetReal("light", "color_b", 0.85))
+    );
+    g_dirlight_dir = glm::vec3(
+        static_cast<float>(settings_reader.GetReal("light", "dir_x", 0.0)),
+        static_cast<float>(settings_reader.GetReal("light", "dir_y", 1.0)),
+        static_cast<float>(settings_reader.GetReal("light", "dir_z", -1.0))
+    );
+
+    g_terrain_ka = static_cast<float>(settings_reader.GetReal("terrain", "ka", 0.1));
+    g_terrain_kd = static_cast<float>(settings_reader.GetReal("terrain", "kd", 0.9));
+    g_terrain_ks = static_cast<float>(settings_reader.GetReal("terrain", "ks", 0.3));
+    g_terrain_alpha = static_cast<float>(settings_reader.GetReal("terrain", "alpha", 10.0));
+    g_dirt_to_grass_height_offset = static_cast<float>(settings_reader.GetReal("terrain", "dirt_to_grass_height_offset", 3.0));
+    g_grass_to_rock_height_offset = static_cast<float>(settings_reader.GetReal("terrain", "grass_to_rock_height_offset", 10.0));
+    g_height_color_transition_band = static_cast<float>(settings_reader.GetReal("terrain", "height_color_transition_band", 2.0));
+    g_water_depth_bias = static_cast<float>(settings_reader.GetReal("terrain", "water_depth_bias", 0.05));
+    g_blend_duration = settings_reader.GetReal("terrain", "blend_duration", 2.0);
+
+    g_max_destroys_per_frame = static_cast<int>(settings_reader.GetInteger("chunks", "max_destroys_per_frame", 16));
+    g_max_uploads_per_frame = static_cast<int>(settings_reader.GetInteger("chunks", "max_uploads_per_frame", 8));
+
+    g_demo_height_interp_duration = settings_reader.GetReal("demo", "height_interp_duration", 1.0);
+    g_demo_water_interp_duration = settings_reader.GetReal("demo", "water_interp_duration", 1.0);
 
     // Install a callback function, which gets invoked whenever a GLFW error occurred.
     glfwSetErrorCallback(errorCallbackFromGlfw);
@@ -909,9 +983,9 @@ int main() {
     VklSwapchainConfig swapchain_config = {};
 
     VkClearValue color_clear_value;
-    color_clear_value.color.float32[0] = BACKGROUND_R;
-    color_clear_value.color.float32[1] = BACKGROUND_G;
-    color_clear_value.color.float32[2] = BACKGROUND_B;
+    color_clear_value.color.float32[0] = background_r;
+    color_clear_value.color.float32[1] = background_g;
+    color_clear_value.color.float32[2] = background_b;
     color_clear_value.color.float32[3] = 1.0f;
 
     swapchain_config.swapchainHandle = vk_swapchain;
@@ -966,7 +1040,12 @@ int main() {
     // Set up the Scene
     /* --------------------------------------------- */
     TerrainParams initial_terrain_params;
-    TerrainScene terrain_scene = setupTerrainScene(vk_device, vk_queue, selected_queue_family_index, initial_terrain_params);
+    initial_terrain_params.hurst = initial_hurst;
+    initial_terrain_params.seed = initial_seed;
+    initial_terrain_params.gridSizeExponent = initial_grid_size_exponent;
+    TerrainScene terrain_scene = setupTerrainScene(
+        vk_device, vk_queue, selected_queue_family_index, initial_terrain_params, initial_height_scale, initial_roughness, initial_water_level
+    );
     generateTerrainGeometryWithLoadingScreen(vk_device, terrain_scene.chunkManager, activeCamera->getPosition());
 
     WaterScene water_scene = setupWaterScene(vk_device, initial_terrain_params);
@@ -1087,7 +1166,6 @@ int main() {
         // (no regeneration needed) — picks a new random target every second and smoothly interpolates
         // toward it, so the exaggeration keeps drifting continuously instead of popping.
         if (g_demo_mode) {
-            constexpr double kDemoHeightInterpDuration = 1.0;
             if (g_demo_height_interp_start_time < 0.0) {
                 // First activation: interpolate from whatever the height scale currently is.
                 g_demo_height_start = terrain_scene.heightScale;
@@ -1095,14 +1173,32 @@ int main() {
                 g_demo_height_interp_start_time = currentFrameTime;
             }
             double elapsed = currentFrameTime - g_demo_height_interp_start_time;
-            if (elapsed >= kDemoHeightInterpDuration) {
+            if (elapsed >= g_demo_height_interp_duration) {
                 g_demo_height_start = g_demo_height_target;
                 g_demo_height_target = generateRandomHeightScale();
                 g_demo_height_interp_start_time = currentFrameTime;
                 elapsed = 0.0;
             }
-            float t = static_cast<float>(glm::clamp(elapsed / kDemoHeightInterpDuration, 0.0, 1.0));
+            float t = static_cast<float>(glm::clamp(elapsed / g_demo_height_interp_duration, 0.0, 1.0));
             terrain_scene.heightScale = glm::mix(g_demo_height_start, g_demo_height_target, t);
+        }
+
+        // Demo mode's water level: same independent-timer drift pattern as height scale above.
+        if (g_demo_mode) {
+            if (g_demo_water_interp_start_time < 0.0) {
+                g_demo_water_start = terrain_scene.waterLevel;
+                g_demo_water_target = generateRandomWaterLevel();
+                g_demo_water_interp_start_time = currentFrameTime;
+            }
+            double elapsed = currentFrameTime - g_demo_water_interp_start_time;
+            if (elapsed >= g_demo_water_interp_duration) {
+                g_demo_water_start = g_demo_water_target;
+                g_demo_water_target = generateRandomWaterLevel();
+                g_demo_water_interp_start_time = currentFrameTime;
+                elapsed = 0.0;
+            }
+            float t = static_cast<float>(glm::clamp(elapsed / g_demo_water_interp_duration, 0.0, 1.0));
+            terrain_scene.waterLevel = glm::mix(g_demo_water_start, g_demo_water_target, t);
         }
 
         if (g_chunk_view_radius_changed) {
@@ -1136,9 +1232,8 @@ int main() {
 
         float delta_x = mouse_x - mouse_x_last;
         float delta_y = mouse_y - mouse_y_last;
-        constexpr float kMouseSensitivity = 0.005f;
-        float yawDelta = delta_x * kMouseSensitivity;
-        float pitchDelta = -delta_y * kMouseSensitivity;
+        float yawDelta = delta_x * g_mouse_sensitivity;
+        float pitchDelta = -delta_y * g_mouse_sensitivity;
         if (g_toggle_camera || g_dragging) activeCamera->rotate((g_toggle_camera ? -1 : 1) * yawDelta, pitchDelta);
 
         bool shiftHeld = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
@@ -1152,7 +1247,7 @@ int main() {
         }
 
         if (!g_toggle_camera && g_scroll_delta != 0.0f) {
-            trackballCamera.zoom(g_scroll_delta * trackballCamera.kScrollSensitivity);
+            trackballCamera.zoom(g_scroll_delta * g_scroll_sensitivity);
         }
         g_scroll_delta = 0.0f;
 
@@ -1815,14 +1910,24 @@ VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_i
     return vklCreateGraphicsPipeline(pipeline_config);
 }
 
-TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t selected_queue_family_index, TerrainParams& params) {
+TerrainScene setupTerrainScene(
+    VkDevice vk_device,
+    VkQueue vk_queue,
+    uint32_t selected_queue_family_index,
+    TerrainParams& params,
+    float initial_height_scale,
+    float initial_roughness,
+    float initial_water_level
+) {
     TerrainScene scene{};
-    scene.heightScale = 1.0f;
-    scene.roughness = 0.6f;
-    // 1 unit below DIRT_TO_GRASS_HEIGHT_OFFSET, so the dirt/grass transition doesn't poke above water.
-    scene.waterLevel = DIRT_TO_GRASS_HEIGHT_OFFSET - 1.0f;
+    scene.heightScale = initial_height_scale;
+    scene.roughness = initial_roughness;
+    scene.waterLevel = initial_water_level;
     scene.chunkManager.baseParams = params;
     scene.chunkManager.viewRadius = g_chunk_view_radius;
+    scene.chunkManager.blendDuration = g_blend_duration;
+    scene.chunkManager.maxDestroysPerFrame = g_max_destroys_per_frame;
+    scene.chunkManager.maxUploadsPerFrame = g_max_uploads_per_frame;
     g_hurst = params.hurst;
 
     /* --------------------------------------------- */
@@ -1869,7 +1974,9 @@ TerrainScene setupTerrainScene(VkDevice vk_device, VkQueue vk_queue, uint32_t se
         sizeof(DirectionalLight) * num_dirlights,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
     );
-    DirectionalLight directional_light = {DIRLIGHT_COLOR, glm::normalize(DIRLIGHT_DIR)};
+    DirectionalLight directional_light = {
+        glm::vec4(g_dirlight_color, 0.0f), glm::normalize(glm::vec4(g_dirlight_dir, 0.0f))
+    };
     vklCopyDataIntoHostCoherentBuffer(scene.ub_dirlight, &directional_light, sizeof(DirectionalLight));
 
     scene.ub_terrain_vert = vklCreateHostCoherentBufferWithBackingMemory(
@@ -1897,15 +2004,15 @@ void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Ca
 
     UniformBufferFrag ub_frag_data;
     ub_frag_data.cameraPosition = glm::vec4{camera->getPosition(), 1.0f};
-    ub_frag_data.materialProperties = {CORNELL_KA, CORNELL_KD, CORNELL_KS, CORNELL_ALPHA};
+    ub_frag_data.materialProperties = {g_terrain_ka, g_terrain_kd, g_terrain_ks, g_terrain_alpha};
     ub_frag_data.debugToggles = glm::uvec2{g_draw_normals ? 1u : 0u, g_highlight_chunk_borders ? 1u : 0u};
     ub_frag_data.isUnderwater = camera->getPosition().z < scene.waterLevel * scene.heightScale ? 1 : 0;
     int gridSize = (1 << scene.chunkManager.baseParams.gridSizeExponent) + 1;
     ub_frag_data.chunkWidth = static_cast<float>((gridSize - 1) * scene.chunkManager.baseParams.spacing);
     ub_frag_data.roughness = scene.roughness;
-    ub_frag_data.dirtToGrassHeight = scene.waterLevel + DIRT_TO_GRASS_HEIGHT_OFFSET;
-    ub_frag_data.grassToRockHeight = scene.waterLevel + GRASS_TO_ROCK_HEIGHT_OFFSET;
-    ub_frag_data.heightColorTransitionBand = HEIGHT_COLOR_TRANSITION_BAND;
+    ub_frag_data.dirtToGrassHeight = scene.waterLevel + g_dirt_to_grass_height_offset;
+    ub_frag_data.grassToRockHeight = scene.waterLevel + g_grass_to_rock_height_offset;
+    ub_frag_data.heightColorTransitionBand = g_height_color_transition_band;
     vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_frag, &ub_frag_data, sizeof(UniformBufferFrag));
 
     VkPipeline& selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
@@ -2046,7 +2153,7 @@ void updateWaterChunks(VkDevice vk_device, WaterScene& scene, const ChunkManager
 void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scene, const Camera* camera) {
     UniformBufferWaterVert ub_data;
     ub_data.modelMatrix =
-        glm::translate(glm::mat4{1.0f}, glm::vec3(0.0f, 0.0f, terrain_scene.waterLevel * terrain_scene.heightScale + WATER_DEPTH_BIAS));
+        glm::translate(glm::mat4{1.0f}, glm::vec3(0.0f, 0.0f, terrain_scene.waterLevel * terrain_scene.heightScale + g_water_depth_bias));
     ub_data.viewProjMatrix = camera->getViewProjectionMatrix();
     vklCopyDataIntoHostCoherentBuffer(scene.ub_water_vert, &ub_data, sizeof(UniformBufferWaterVert));
 
@@ -2135,6 +2242,14 @@ float generateRandomHurst() {
 float generateRandomHeightScale() {
     static std::mt19937 rng(std::random_device{}());
     static std::uniform_real_distribution<float> dist(1.0f, 5.0f);
+    return dist(rng);
+}
+
+// Inset from the slider's full [-25, 25] range — comfortably varied without drifting the water
+// plane absurdly far from where the terrain actually sits.
+float generateRandomWaterLevel() {
+    static std::mt19937 rng(std::random_device{}());
+    static std::uniform_real_distribution<float> dist(-15.0f, 15.0f);
     return dist(rng);
 }
 

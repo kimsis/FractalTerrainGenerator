@@ -86,7 +86,7 @@ struct ChunkManager {
     VkBuffer sharedIndicesBuffer = VK_NULL_HANDLE;
     uint32_t sharedNumberOfIndices = 0;
 
-    int viewRadius = 8;
+    int viewRadius = 16;
 
     // Duration of a per-chunk Hurst/reseed blend, in the same units as updateLoadedChunks's currentTime.
     double blendDuration = 2.0;
