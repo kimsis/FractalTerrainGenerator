@@ -2,8 +2,8 @@ diff --git a/VulkanLaunchpad.cpp b/VulkanLaunchpad.cpp
 index 4fc9d7c..8aff8bd 100644
 --- a/VulkanLaunchpad.cpp
 +++ b/VulkanLaunchpad.cpp
-@@ -79,7 +79,12 @@ bool mHasDepthAttachments = false;
- 
+@@ -79,7 +79,11 @@ bool mHasDepthAttachments = false;
+
  constexpr int CONCURRENT_FRAMES = 1;
  std::array<vk::UniqueSemaphore, CONCURRENT_FRAMES> mImageAvailableSemaphores;
 -std::array<vk::UniqueSemaphore, CONCURRENT_FRAMES> mRenderFinishedSemaphores;
@@ -14,8 +14,8 @@ index 4fc9d7c..8aff8bd 100644
 +std::vector<vk::UniqueSemaphore> mRenderFinishedSemaphores;
  std::array<vk::UniqueFence, CONCURRENT_FRAMES> mSyncHostWithDeviceFence;
  std::vector<int> mImagesInFlightFenceIndices;
- 
-@@ -1311,9 +1316,13 @@ bool vklInitFramework(VkInstance vk_instance, VkSurfaceKHR vk_surface, VkPhysica
+
+@@ -1311,9 +1315,13 @@ bool vklInitFramework(VkInstance vk_instance, VkSurfaceKHR vk_surface, VkPhysicalDevice vk_physical_device, VkDevice vk_device, VkQueue vk_queue, const VklSwapchainConfig& swapchain_config)
  	// Create SEMAPHORES and FENCES, and also prepare the safety-vector of FENCES
  	for (size_t i = 0; i < CONCURRENT_FRAMES; ++i) {
  		mImageAvailableSemaphores[i] = mDevice.createSemaphoreUnique(vk::SemaphoreCreateInfo{}, nullptr, mDispatchLoader);
@@ -28,9 +28,9 @@ index 4fc9d7c..8aff8bd 100644
 +		mRenderFinishedSemaphores[i] = mDevice.createSemaphoreUnique(vk::SemaphoreCreateInfo{}, nullptr, mDispatchLoader);
 +	}
  	mImagesInFlightFenceIndices.resize(mFramebuffers.size(), -1);
- 
+
  	mFrameId = -1;
-@@ -1394,9 +1403,12 @@ void vklDestroyFramework()
+@@ -1394,9 +1402,12 @@ void vklDestroyFramework()
  	mImagesInFlightFenceIndices.clear();
  	for (size_t i = 0; i < CONCURRENT_FRAMES; ++i) {
  		mSyncHostWithDeviceFence[i].reset();
@@ -44,7 +44,7 @@ index 4fc9d7c..8aff8bd 100644
  	mFramebuffers.clear();
  	mRenderpass.reset();
  	for (const auto& set : mSwapchainImageViews) {
-@@ -1486,7 +1498,7 @@ void vklPresentCurrentSwapchainImage()
+@@ -1486,7 +1497,7 @@ void vklPresentCurrentSwapchainImage()
  		.setCommandBufferCount(0u) // Submit ZERO command buffers :O
  		// Signal a semaphore which we need for presentation:
  		.setSignalSemaphoreCount(1u)
@@ -52,8 +52,8 @@ index 4fc9d7c..8aff8bd 100644
 +		.setPSignalSemaphores(&mRenderFinishedSemaphores[mCurrentSwapChainImageIndex].get())
  		// Also signal a fence so that the CPU does not run ahead of the GPU:
  	}, mSyncHostWithDeviceFence[mFrameInFlightIndex].get());
- 
-@@ -1494,7 +1506,7 @@ void vklPresentCurrentSwapchainImage()
+
+@@ -1494,7 +1505,7 @@ void vklPresentCurrentSwapchainImage()
  	auto swapchainHandle = vk::SwapchainKHR{ mSwapchainConfig.swapchainHandle };
  	auto presentInfo = vk::PresentInfoKHR()
  		.setWaitSemaphoreCount(1u)

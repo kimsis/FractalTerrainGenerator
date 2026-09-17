@@ -1,7 +1,8 @@
 diff --git a/VulkanLaunchpad.h b/VulkanLaunchpad.h
+index 994c103..1c8ec13 100644
 --- a/VulkanLaunchpad.h
 +++ b/VulkanLaunchpad.h
-@@ -169,6 +169,13 @@
+@@ -169,6 +169,12 @@ struct VklGraphicsPipelineConfig {
       *    dstColorBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
       */
      bool enableAlphaBlending = false;
@@ -12,13 +13,14 @@ diff --git a/VulkanLaunchpad.h b/VulkanLaunchpad.h
 +     */
 +    std::vector<VkPushConstantRange> pushConstantRanges = {};
  };
- 
+
  /*!
 diff --git a/VulkanLaunchpad.cpp b/VulkanLaunchpad.cpp
+index 4fc9d7c..c4f3d3d 100644
 --- a/VulkanLaunchpad.cpp
 +++ b/VulkanLaunchpad.cpp
-@@ -648,10 +648,13 @@
- 
+@@ -643,10 +643,13 @@ VkPipeline createGraphicsPipelineInternal(const VklGraphicsPipelineConfig& config, bool loadShadersFromMemoryInstead)
+
  	// Continue with configuring our graphics pipeline:
  	// Create a PIPELINE LAYOUT which describes all RESOURCES that are passed in to our pipeline (Resource Descriptors that we have created above)
 +	std::vector<vk::PushConstantRange> pushConstantRanges(std::begin(config.pushConstantRanges), std::end(config.pushConstantRanges));
@@ -30,4 +32,4 @@ diff --git a/VulkanLaunchpad.cpp b/VulkanLaunchpad.cpp
 +			.setPPushConstantRanges(pushConstantRanges.data())
  		, nullptr, mDispatchLoader
  	);
- 
+
