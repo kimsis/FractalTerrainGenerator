@@ -432,6 +432,48 @@ void recreateSwapchainAndDependents(
 );
 
 /*!
+ *	Handles a pending camera-mode toggle (the `C` key, see g_toggle_camera_requested): swaps between
+ *	fly and trackball camera, carrying position/orientation across, and re-syncs the mouse-delta
+ *	baseline so the switch doesn't cause a sudden jump in look direction next frame. No-op if no
+ *	toggle is pending.
+ */
+void handleCameraToggleRequest(
+    GLFWwindow* window,
+    TrackballCamera& trackballCamera,
+    FlyCamera& flyCamera,
+    Camera*& activeCamera,
+    double& mouse_x,
+    double& mouse_y,
+    double& mouse_x_last,
+    double& mouse_y_last
+);
+
+/*!
+ *	Applies any pending reseed/Hurst-change/demo-mode change to the terrain scene for this frame:
+ *	starts a regeneration when needed (guarded by isRegenerating(), same as the GUI's own guard),
+ *	advances demo mode's height-scale/water-level drift, and applies a pending view-radius change.
+ *	Does not itself stream chunks in/out — see updateLoadedChunks() for that.
+ */
+void updateTerrainState(TerrainScene& terrain_scene, double currentFrameTime);
+
+/*!
+ *	Applies this frame's mouse-look, shift-to-run, trackball strafe/zoom, and fly-mode WASD input to
+ *	the active camera. Reads `mouse_x`/`mouse_y` (already updated by the caller for this frame) and
+ *	updates `mouse_x_last`/`mouse_y_last` to them, ready for next frame's delta.
+ */
+void applyCameraInput(
+    GLFWwindow* window,
+    Camera* activeCamera,
+    TrackballCamera& trackballCamera,
+    FlyCamera& flyCamera,
+    double mouse_x,
+    double mouse_y,
+    double& mouse_x_last,
+    double& mouse_y_last,
+    float dt
+);
+
+/*!
  *	Bind the given descriptor set to use the material it represents for subsequent draw calls
  *	with the given pipeline, and render the given chunk (using its vertex and index buffers).
  *	Record everything into the current command buffer as provided by the framework.
@@ -1172,137 +1214,13 @@ int main() {
         }
 
         glfwGetCursorPos(window, &mouse_x, &mouse_y);
-        if (g_toggle_camera_requested) {
-            g_toggle_camera_requested = false;
-            if (!g_toggle_camera) {
-                // Fly camera
-                flyCamera = FlyCamera(trackballCamera);
-                activeCamera = &flyCamera;
-                g_toggle_camera = true;
-                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            } else {
-                // Trackball camera
-                auto hit = raycastTerrain(flyCamera.getPosition(), flyCamera.getForward());
-                if (hit.has_value()) {
-                    trackballCamera = TrackballCamera(flyCamera, hit->point);
-                    activeCamera = &trackballCamera;
-                    g_toggle_camera = false;
-                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-                }
-            }
-            glfwGetCursorPos(window, &mouse_x, &mouse_y);
-            mouse_x_last = mouse_x;
-            mouse_y_last = mouse_y;
-        }
+        handleCameraToggleRequest(window, trackballCamera, flyCamera, activeCamera, mouse_x, mouse_y, mouse_x_last, mouse_y_last);
 
-        // Both triggers are ignored while a previous regeneration is still resolving or blending —
-        // the GUI already disables the Hurst slider/Reseed button for the same reason (see buildGUI),
-        // but the R key shortcut bypasses the GUI, so it needs this guard too.
-        if (g_reseed_requested) {
-            g_reseed_requested = false;
-            if (!isRegenerating(terrain_scene.chunkManager)) {
-                terrain_scene.chunkManager.baseParams.seed = generateRandomSeed();
-                invalidateAllLoadedChunks(terrain_scene.chunkManager);
-            }
-        }
-
-        if (g_hurst_changed) {
-            g_hurst_changed = false;
-            if (!isRegenerating(terrain_scene.chunkManager) && g_hurst != terrain_scene.chunkManager.baseParams.hurst) {
-                terrain_scene.chunkManager.baseParams.hurst = g_hurst;
-                invalidateAllLoadedChunks(terrain_scene.chunkManager);
-            } else {
-                g_hurst = terrain_scene.chunkManager.baseParams.hurst;
-            }
-        }
-
-        // Demo mode (F4): fires the instant the previous regeneration's blend has fully settled, so
-        // the terrain keeps morphing continuously without ever overlapping two regenerations.
-        if (g_demo_mode && !isRegenerating(terrain_scene.chunkManager)) {
-            g_hurst = generateRandomHurst();
-            terrain_scene.chunkManager.baseParams.hurst = g_hurst;
-            terrain_scene.chunkManager.baseParams.seed = generateRandomSeed();
-            invalidateAllLoadedChunks(terrain_scene.chunkManager);
-        }
-
-        // Demo mode's height scale: independent of the above, since it's just a real-time uniform
-        // (no regeneration needed) — picks a new random target every second and smoothly interpolates
-        // toward it, so the exaggeration keeps drifting continuously instead of popping.
-        if (g_demo_mode) {
-            if (g_demo_height_interp_start_time < 0.0) {
-                // First activation: interpolate from whatever the height scale currently is.
-                g_demo_height_start = terrain_scene.heightScale;
-                g_demo_height_target = generateRandomHeightScale();
-                g_demo_height_interp_start_time = currentFrameTime;
-            }
-            double elapsed = currentFrameTime - g_demo_height_interp_start_time;
-            if (elapsed >= g_demo_height_interp_duration) {
-                g_demo_height_start = g_demo_height_target;
-                g_demo_height_target = generateRandomHeightScale();
-                g_demo_height_interp_start_time = currentFrameTime;
-                elapsed = 0.0;
-            }
-            float t = static_cast<float>(glm::clamp(elapsed / g_demo_height_interp_duration, 0.0, 1.0));
-            terrain_scene.heightScale = glm::mix(g_demo_height_start, g_demo_height_target, t);
-        }
-
-        // Demo mode's water level: same independent-timer drift pattern as height scale above.
-        if (g_demo_mode) {
-            if (g_demo_water_interp_start_time < 0.0) {
-                g_demo_water_start = terrain_scene.waterLevel;
-                g_demo_water_target = generateRandomWaterLevel();
-                g_demo_water_interp_start_time = currentFrameTime;
-            }
-            double elapsed = currentFrameTime - g_demo_water_interp_start_time;
-            if (elapsed >= g_demo_water_interp_duration) {
-                g_demo_water_start = g_demo_water_target;
-                g_demo_water_target = generateRandomWaterLevel();
-                g_demo_water_interp_start_time = currentFrameTime;
-                elapsed = 0.0;
-            }
-            float t = static_cast<float>(glm::clamp(elapsed / g_demo_water_interp_duration, 0.0, 1.0));
-            terrain_scene.waterLevel = glm::mix(g_demo_water_start, g_demo_water_target, t);
-        }
-
-        if (g_chunk_view_radius_changed) {
-            g_chunk_view_radius_changed = false;
-            terrain_scene.chunkManager.viewRadius = g_chunk_view_radius;
-        }
+        updateTerrainState(terrain_scene, currentFrameTime);
         updateLoadedChunks(terrain_scene.chunkManager, activeCamera->getPosition(), currentFrameTime);
         updateWaterChunks(vk_device, water_scene, terrain_scene.chunkManager);
 
-        float delta_x = mouse_x - mouse_x_last;
-        float delta_y = mouse_y - mouse_y_last;
-        float yawDelta = delta_x * g_mouse_sensitivity;
-        float pitchDelta = -delta_y * g_mouse_sensitivity;
-        if (g_toggle_camera || g_dragging) activeCamera->rotate((g_toggle_camera ? -1 : 1) * yawDelta, pitchDelta);
-
-        bool shiftHeld = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
-        activeCamera->setSpeed(g_camera_speed * (shiftHeld ? 2.0f : 1.0f));
-
-        if (g_strafing && !g_toggle_camera) {
-            glm::vec3 right = trackballCamera.getRight();
-            glm::vec3 camUp = trackballCamera.getUp();
-            glm::vec3 worldDelta = (-delta_x * right + delta_y * camUp) * trackballCamera.kPanSensitivity;
-            trackballCamera.translate(worldDelta);
-        }
-
-        if (!g_toggle_camera && g_scroll_delta != 0.0f) {
-            trackballCamera.zoom(g_scroll_delta * g_scroll_sensitivity);
-        }
-        g_scroll_delta = 0.0f;
-
-        if (g_toggle_camera && !ImGui::GetIO().WantCaptureKeyboard) {
-            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) flyCamera.moveForward(dt);
-            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) flyCamera.moveBackward(dt);
-            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) flyCamera.moveLeft(dt);
-            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) flyCamera.moveRight(dt);
-            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) flyCamera.moveUp(dt);
-            if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) flyCamera.moveDown(dt);
-        }
-
-        mouse_x_last = mouse_x;
-        mouse_y_last = mouse_y;
+        applyCameraInput(window, activeCamera, trackballCamera, flyCamera, mouse_x, mouse_y, mouse_x_last, mouse_y_last, dt);
 
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -1496,6 +1414,161 @@ void recreateSwapchainAndDependents(
     float new_aspect_ratio = static_cast<float>(new_extent.width) / static_cast<float>(new_extent.height);
     trackballCamera.setAspectRatio(new_aspect_ratio);
     flyCamera.setAspectRatio(new_aspect_ratio);
+}
+
+void handleCameraToggleRequest(
+    GLFWwindow* window,
+    TrackballCamera& trackballCamera,
+    FlyCamera& flyCamera,
+    Camera*& activeCamera,
+    double& mouse_x,
+    double& mouse_y,
+    double& mouse_x_last,
+    double& mouse_y_last
+) {
+    if (!g_toggle_camera_requested) return;
+    g_toggle_camera_requested = false;
+
+    if (!g_toggle_camera) {
+        // Fly camera
+        flyCamera = FlyCamera(trackballCamera);
+        activeCamera = &flyCamera;
+        g_toggle_camera = true;
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    } else {
+        // Trackball camera
+        auto hit = raycastTerrain(flyCamera.getPosition(), flyCamera.getForward());
+        if (hit.has_value()) {
+            trackballCamera = TrackballCamera(flyCamera, hit->point);
+            activeCamera = &trackballCamera;
+            g_toggle_camera = false;
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        }
+    }
+    glfwGetCursorPos(window, &mouse_x, &mouse_y);
+    mouse_x_last = mouse_x;
+    mouse_y_last = mouse_y;
+}
+
+void updateTerrainState(TerrainScene& terrain_scene, double currentFrameTime) {
+    // Both triggers are ignored while a previous regeneration is still resolving or blending —
+    // the GUI already disables the Hurst slider/Reseed button for the same reason (see buildGUI),
+    // but the R key shortcut bypasses the GUI, so it needs this guard too.
+    if (g_reseed_requested) {
+        g_reseed_requested = false;
+        if (!isRegenerating(terrain_scene.chunkManager)) {
+            terrain_scene.chunkManager.baseParams.seed = generateRandomSeed();
+            invalidateAllLoadedChunks(terrain_scene.chunkManager);
+        }
+    }
+
+    if (g_hurst_changed) {
+        g_hurst_changed = false;
+        if (!isRegenerating(terrain_scene.chunkManager) && g_hurst != terrain_scene.chunkManager.baseParams.hurst) {
+            terrain_scene.chunkManager.baseParams.hurst = g_hurst;
+            invalidateAllLoadedChunks(terrain_scene.chunkManager);
+        } else {
+            g_hurst = terrain_scene.chunkManager.baseParams.hurst;
+        }
+    }
+
+    // Demo mode (F4): fires the instant the previous regeneration's blend has fully settled, so
+    // the terrain keeps morphing continuously without ever overlapping two regenerations.
+    if (g_demo_mode && !isRegenerating(terrain_scene.chunkManager)) {
+        g_hurst = generateRandomHurst();
+        terrain_scene.chunkManager.baseParams.hurst = g_hurst;
+        terrain_scene.chunkManager.baseParams.seed = generateRandomSeed();
+        invalidateAllLoadedChunks(terrain_scene.chunkManager);
+    }
+
+    // Demo mode's height scale: independent of the above, since it's just a real-time uniform
+    // (no regeneration needed) — picks a new random target every second and smoothly interpolates
+    // toward it, so the exaggeration keeps drifting continuously instead of popping.
+    if (g_demo_mode) {
+        if (g_demo_height_interp_start_time < 0.0) {
+            // First activation: interpolate from whatever the height scale currently is.
+            g_demo_height_start = terrain_scene.heightScale;
+            g_demo_height_target = generateRandomHeightScale();
+            g_demo_height_interp_start_time = currentFrameTime;
+        }
+        double elapsed = currentFrameTime - g_demo_height_interp_start_time;
+        if (elapsed >= g_demo_height_interp_duration) {
+            g_demo_height_start = g_demo_height_target;
+            g_demo_height_target = generateRandomHeightScale();
+            g_demo_height_interp_start_time = currentFrameTime;
+            elapsed = 0.0;
+        }
+        float t = static_cast<float>(glm::clamp(elapsed / g_demo_height_interp_duration, 0.0, 1.0));
+        terrain_scene.heightScale = glm::mix(g_demo_height_start, g_demo_height_target, t);
+    }
+
+    // Demo mode's water level: same independent-timer drift pattern as height scale above.
+    if (g_demo_mode) {
+        if (g_demo_water_interp_start_time < 0.0) {
+            g_demo_water_start = terrain_scene.waterLevel;
+            g_demo_water_target = generateRandomWaterLevel();
+            g_demo_water_interp_start_time = currentFrameTime;
+        }
+        double elapsed = currentFrameTime - g_demo_water_interp_start_time;
+        if (elapsed >= g_demo_water_interp_duration) {
+            g_demo_water_start = g_demo_water_target;
+            g_demo_water_target = generateRandomWaterLevel();
+            g_demo_water_interp_start_time = currentFrameTime;
+            elapsed = 0.0;
+        }
+        float t = static_cast<float>(glm::clamp(elapsed / g_demo_water_interp_duration, 0.0, 1.0));
+        terrain_scene.waterLevel = glm::mix(g_demo_water_start, g_demo_water_target, t);
+    }
+
+    if (g_chunk_view_radius_changed) {
+        g_chunk_view_radius_changed = false;
+        terrain_scene.chunkManager.viewRadius = g_chunk_view_radius;
+    }
+}
+
+void applyCameraInput(
+    GLFWwindow* window,
+    Camera* activeCamera,
+    TrackballCamera& trackballCamera,
+    FlyCamera& flyCamera,
+    double mouse_x,
+    double mouse_y,
+    double& mouse_x_last,
+    double& mouse_y_last,
+    float dt
+) {
+    float delta_x = mouse_x - mouse_x_last;
+    float delta_y = mouse_y - mouse_y_last;
+    float yawDelta = delta_x * g_mouse_sensitivity;
+    float pitchDelta = -delta_y * g_mouse_sensitivity;
+    if (g_toggle_camera || g_dragging) activeCamera->rotate((g_toggle_camera ? -1 : 1) * yawDelta, pitchDelta);
+
+    bool shiftHeld = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS;
+    activeCamera->setSpeed(g_camera_speed * (shiftHeld ? 2.0f : 1.0f));
+
+    if (g_strafing && !g_toggle_camera) {
+        glm::vec3 right = trackballCamera.getRight();
+        glm::vec3 camUp = trackballCamera.getUp();
+        glm::vec3 worldDelta = (-delta_x * right + delta_y * camUp) * trackballCamera.kPanSensitivity;
+        trackballCamera.translate(worldDelta);
+    }
+
+    if (!g_toggle_camera && g_scroll_delta != 0.0f) {
+        trackballCamera.zoom(g_scroll_delta * g_scroll_sensitivity);
+    }
+    g_scroll_delta = 0.0f;
+
+    if (g_toggle_camera && !ImGui::GetIO().WantCaptureKeyboard) {
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) flyCamera.moveForward(dt);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) flyCamera.moveBackward(dt);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) flyCamera.moveLeft(dt);
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) flyCamera.moveRight(dt);
+        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) flyCamera.moveUp(dt);
+        if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) flyCamera.moveDown(dt);
+    }
+
+    mouse_x_last = mouse_x;
+    mouse_y_last = mouse_y;
 }
 
 void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int action, int mods) {
