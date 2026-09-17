@@ -204,6 +204,26 @@ struct WaterScene {
     std::unordered_map<ChunkCoord, WaterChunkGeometry> chunkGeometry;
 };
 
+/*!
+ *	Everything recreateSwapchainAndDependents needs that stays fixed for the whole render loop —
+ *	built once before the loop starts. Kept separate from the Vulkan/camera objects it actually
+ *	replaces (vk_swapchain, depth_buffer, ...), which are passed as mutable references instead since
+ *	each call updates them in place.
+ */
+struct SwapchainRecreateContext {
+    GLFWwindow* window;
+    VkInstance vk_instance;
+    VkPhysicalDevice vk_physical_device;
+    VkDevice vk_device;
+    VkQueue vk_queue;
+    uint32_t selected_queue_family_index;
+    VkSurfaceKHR vk_surface;
+    VkSurfaceFormatKHR surface_format;
+    bool depthtest;
+    VkClearValue color_clear_value;
+    VkClearValue depth_clear_value;
+};
+
 /* --------------------------------------------- */
 // Helper Function Declarations
 /* --------------------------------------------- */
@@ -363,17 +383,7 @@ void framebufferSizeCallbackFromGlfw(GLFWwindow* glfw_window, int width, int hei
  *	live as locals in main().
  */
 void recreateSwapchainAndDependents(
-    GLFWwindow* window,
-    VkInstance vk_instance,
-    VkPhysicalDevice vk_physical_device,
-    VkDevice vk_device,
-    VkQueue vk_queue,
-    uint32_t selected_queue_family_index,
-    VkSurfaceKHR vk_surface,
-    VkSurfaceFormatKHR surface_format,
-    bool depthtest,
-    VkClearValue color_clear_value,
-    VkClearValue depth_clear_value,
+    const SwapchainRecreateContext& ctx,
     VkSwapchainKHR& vk_swapchain,
     VkImage& depth_buffer,
     std::vector<VkImage>& swapchain_image_handles,
@@ -1079,6 +1089,22 @@ int main() {
 
     glfwSetWindowAttrib(window, GLFW_RESIZABLE, GLFW_TRUE);
 
+    // Everything recreateSwapchainAndDependents needs that stays fixed for the whole loop below —
+    // built once here instead of re-listed at each of its three call sites.
+    SwapchainRecreateContext swapchain_recreate_ctx{
+        window,
+        vk_instance,
+        vk_physical_device,
+        vk_device,
+        vk_queue,
+        selected_queue_family_index,
+        vk_surface,
+        surface_format,
+        depthtest,
+        color_clear_value,
+        depth_clear_value
+    };
+
     while (!glfwWindowShouldClose(window)) {
         double currentFrameTime = glfwGetTime();
         float dt = static_cast<float>(currentFrameTime - lastFrameTime);
@@ -1092,17 +1118,7 @@ int main() {
         if (g_framebuffer_resized || current_fb_width != window_width || current_fb_height != window_height) {
             g_framebuffer_resized = false;
             recreateSwapchainAndDependents(
-                window,
-                vk_instance,
-                vk_physical_device,
-                vk_device,
-                vk_queue,
-                selected_queue_family_index,
-                vk_surface,
-                surface_format,
-                depthtest,
-                color_clear_value,
-                depth_clear_value,
+                swapchain_recreate_ctx,
                 vk_swapchain,
                 depth_buffer,
                 swapchain_image_handles,
@@ -1258,17 +1274,7 @@ int main() {
             vklWaitForNextSwapchainImage();
         } catch (const vk::OutOfDateKHRError&) {
             recreateSwapchainAndDependents(
-                window,
-                vk_instance,
-                vk_physical_device,
-                vk_device,
-                vk_queue,
-                selected_queue_family_index,
-                vk_surface,
-                surface_format,
-                depthtest,
-                color_clear_value,
-                depth_clear_value,
+                swapchain_recreate_ctx,
                 vk_swapchain,
                 depth_buffer,
                 swapchain_image_handles,
@@ -1293,17 +1299,7 @@ int main() {
             vklPresentCurrentSwapchainImage();
         } catch (const vk::OutOfDateKHRError&) {
             recreateSwapchainAndDependents(
-                window,
-                vk_instance,
-                vk_physical_device,
-                vk_device,
-                vk_queue,
-                selected_queue_family_index,
-                vk_surface,
-                surface_format,
-                depthtest,
-                color_clear_value,
-                depth_clear_value,
+                swapchain_recreate_ctx,
                 vk_swapchain,
                 depth_buffer,
                 swapchain_image_handles,
@@ -1352,17 +1348,7 @@ int main() {
 void errorCallbackFromGlfw(int error, const char* description) { std::cout << "GLFW error " << error << ": " << description << std::endl; }
 
 void recreateSwapchainAndDependents(
-    GLFWwindow* window,
-    VkInstance vk_instance,
-    VkPhysicalDevice vk_physical_device,
-    VkDevice vk_device,
-    VkQueue vk_queue,
-    uint32_t selected_queue_family_index,
-    VkSurfaceKHR vk_surface,
-    VkSurfaceFormatKHR surface_format,
-    bool depthtest,
-    VkClearValue color_clear_value,
-    VkClearValue depth_clear_value,
+    const SwapchainRecreateContext& ctx,
     VkSwapchainKHR& vk_swapchain,
     VkImage& depth_buffer,
     std::vector<VkImage>& swapchain_image_handles,
@@ -1372,20 +1358,20 @@ void recreateSwapchainAndDependents(
     FlyCamera& flyCamera
 ) {
     int fb_width = 0, fb_height = 0;
-    glfwGetFramebufferSize(window, &fb_width, &fb_height);
+    glfwGetFramebufferSize(ctx.window, &fb_width, &fb_height);
     while (fb_width == 0 || fb_height == 0) {
         // Minimized: block until the window is restored.
-        glfwGetFramebufferSize(window, &fb_width, &fb_height);
+        glfwGetFramebufferSize(ctx.window, &fb_width, &fb_height);
         glfwWaitEvents();
     }
 
-    vkDeviceWaitIdle(vk_device);
+    vkDeviceWaitIdle(ctx.vk_device);
 
     vklDestroyDeviceLocalImageAndItsBackingMemory(depth_buffer);
     VkSwapchainKHR old_swapchain = vk_swapchain;
     vklDestroyFramework();
 
-    VkSurfaceCapabilitiesKHR new_surface_capabilities = getPhysicalDeviceSurfaceCapabilities(vk_physical_device, vk_surface);
+    VkSurfaceCapabilitiesKHR new_surface_capabilities = getPhysicalDeviceSurfaceCapabilities(ctx.vk_physical_device, ctx.vk_surface);
     VkExtent2D new_extent;
     if (new_surface_capabilities.currentExtent.width != UINT32_MAX) {
         new_extent = new_surface_capabilities.currentExtent;
@@ -1401,7 +1387,7 @@ void recreateSwapchainAndDependents(
 
     VkSwapchainCreateInfoKHR new_swapchain_create_info = {};
     new_swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    new_swapchain_create_info.surface = vk_surface;
+    new_swapchain_create_info.surface = ctx.vk_surface;
     new_swapchain_create_info.minImageCount = new_surface_capabilities.minImageCount;
     new_swapchain_create_info.imageArrayLayers = 1u;
     new_swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -1413,25 +1399,25 @@ void recreateSwapchainAndDependents(
     new_swapchain_create_info.clipped = VK_TRUE;
     new_swapchain_create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     new_swapchain_create_info.queueFamilyIndexCount = 1u;
-    new_swapchain_create_info.pQueueFamilyIndices = &selected_queue_family_index;
-    new_swapchain_create_info.imageFormat = surface_format.format;
-    new_swapchain_create_info.imageColorSpace = surface_format.colorSpace;
+    new_swapchain_create_info.pQueueFamilyIndices = &ctx.selected_queue_family_index;
+    new_swapchain_create_info.imageFormat = ctx.surface_format.format;
+    new_swapchain_create_info.imageColorSpace = ctx.surface_format.colorSpace;
     new_swapchain_create_info.imageExtent = new_extent;
     new_swapchain_create_info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
     new_swapchain_create_info.oldSwapchain = old_swapchain;
 
-    VkResult swap_result = vkCreateSwapchainKHR(vk_device, &new_swapchain_create_info, nullptr, &vk_swapchain);
+    VkResult swap_result = vkCreateSwapchainKHR(ctx.vk_device, &new_swapchain_create_info, nullptr, &vk_swapchain);
     VKL_CHECK_VULKAN_RESULT(swap_result);
-    vkDestroySwapchainKHR(vk_device, old_swapchain, nullptr);
+    vkDestroySwapchainKHR(ctx.vk_device, old_swapchain, nullptr);
 
     uint32_t new_swapchain_image_count;
-    vkGetSwapchainImagesKHR(vk_device, vk_swapchain, &new_swapchain_image_count, nullptr);
+    vkGetSwapchainImagesKHR(ctx.vk_device, vk_swapchain, &new_swapchain_image_count, nullptr);
     swapchain_image_handles.resize(new_swapchain_image_count);
-    vkGetSwapchainImagesKHR(vk_device, vk_swapchain, &new_swapchain_image_count, swapchain_image_handles.data());
+    vkGetSwapchainImagesKHR(ctx.vk_device, vk_swapchain, &new_swapchain_image_count, swapchain_image_handles.data());
 
     depth_buffer = vklCreateDeviceLocalImageWithBackingMemory(
-        vk_physical_device,
-        vk_device,
+        ctx.vk_physical_device,
+        ctx.vk_device,
         static_cast<int>(new_extent.width),
         static_cast<int>(new_extent.height),
         VK_FORMAT_D32_SFLOAT,
@@ -1446,17 +1432,17 @@ void recreateSwapchainAndDependents(
         framebufferComposition.colorAttachmentImageDetails.imageHandle = img;
         framebufferComposition.colorAttachmentImageDetails.imageFormat = new_swapchain_create_info.imageFormat;
         framebufferComposition.colorAttachmentImageDetails.imageUsage = new_swapchain_create_info.imageUsage;
-        framebufferComposition.colorAttachmentImageDetails.clearValue = color_clear_value;
-        if (depthtest) {
+        framebufferComposition.colorAttachmentImageDetails.clearValue = ctx.color_clear_value;
+        if (ctx.depthtest) {
             framebufferComposition.depthAttachmentImageDetails.imageHandle = depth_buffer;
             framebufferComposition.depthAttachmentImageDetails.imageFormat = VK_FORMAT_D32_SFLOAT;
             framebufferComposition.depthAttachmentImageDetails.imageUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-            framebufferComposition.depthAttachmentImageDetails.clearValue = depth_clear_value;
+            framebufferComposition.depthAttachmentImageDetails.clearValue = ctx.depth_clear_value;
         }
         new_swapchain_config.swapchainImages.push_back(framebufferComposition);
     }
 
-    if (!vklInitFramework(vk_instance, vk_surface, vk_physical_device, vk_device, vk_queue, new_swapchain_config)) {
+    if (!vklInitFramework(ctx.vk_instance, ctx.vk_surface, ctx.vk_physical_device, ctx.vk_device, ctx.vk_queue, new_swapchain_config)) {
         VKL_EXIT_WITH_ERROR("Failed to reinit framework after window resize");
     }
 
