@@ -255,6 +255,20 @@ struct SwapchainRecreateContext {
     VkClearValue depth_clear_value;
 };
 
+/*!
+ *	Everything createSwapchain produces that main() still needs afterward, beyond the swapchain
+ *	handle itself: the surface format/capabilities (needed again for ImGui init and
+ *	SwapchainRecreateContext) and the image usage flags actually used (needed to build the
+ *	framebuffer composition — see buildSwapchainConfig).
+ */
+struct SwapchainSetup {
+    VkSwapchainKHR swapchain;
+    VkSurfaceFormatKHR surface_format;
+    VkSurfaceCapabilitiesKHR surface_capabilities;
+    VkImageUsageFlags image_usage;
+    std::vector<VkImage> image_handles;
+};
+
 /* --------------------------------------------- */
 // Helper Function Declarations
 /* --------------------------------------------- */
@@ -361,6 +375,89 @@ VkSurfaceFormatKHR getSurfaceImageFormat(VkPhysicalDevice physical_device, VkSur
  *	@return		The surface capabilities' currentTransform value is returned, which is suitable for swap chain config.
  */
 VkSurfaceTransformFlagBitsKHR getSurfaceTransform(VkPhysicalDevice physical_device, VkSurfaceKHR surface);
+
+/*!
+ *	Creates the VkInstance: application info, required extensions (getRequiredInstanceExtensions),
+ *	and the validation layer if supported.
+ */
+VkInstance createVulkanInstance();
+
+/*!
+ *	Creates the VkSurfaceKHR for the given window.
+ */
+VkSurfaceKHR createWindowSurface(VkInstance vk_instance, GLFWwindow* window);
+
+/*!
+ *	Enumerates the system's physical devices and selects one via selectPhysicalDeviceIndex.
+ */
+VkPhysicalDevice pickPhysicalDevice(VkInstance vk_instance, VkSurfaceKHR vk_surface);
+
+/*!
+ *	Builds the VkDeviceQueueCreateInfo for the given (already-selected, see selectQueueFamilyIndex)
+ *	queue family, after sanity-checking that index against vkGetPhysicalDeviceQueueFamilyProperties.
+ */
+VkDeviceQueueCreateInfo createQueueCreateInfo(VkPhysicalDevice vk_physical_device, uint32_t selected_queue_family_index);
+
+/*!
+ *	Creates the logical device (with the extensions/features this app needs, including detecting
+ *	Synchronization2 support — see g_synchronization2_supported) and retrieves its queue.
+ */
+VkDevice createLogicalDeviceAndQueue(
+    VkPhysicalDevice vk_physical_device,
+    const VkDeviceQueueCreateInfo& device_queue_create_info,
+    uint32_t selected_queue_family_index,
+    VkQueue& out_vk_queue
+);
+
+/*!
+ *	Creates the swapchain sized to the surface's actual capabilities (clamping/overwriting
+ *	window_width/window_height to match), and retrieves its images.
+ */
+SwapchainSetup createSwapchain(
+    VkPhysicalDevice vk_physical_device,
+    VkSurfaceKHR vk_surface,
+    VkDevice vk_device,
+    uint32_t selected_queue_family_index,
+    int& window_width,
+    int& window_height
+);
+
+/*!
+ *	Creates the depth buffer image used by every pipeline with depth test/write enabled.
+ */
+VkImage createDepthBuffer(VkPhysicalDevice vk_physical_device, VkDevice vk_device, int width, int height);
+
+/*!
+ *	Builds the per-swapchain-image framebuffer composition the framework needs — one entry per
+ *	image, each with a color attachment and (if depthtest) a shared depth attachment. Used both for
+ *	the framework's initial setup and, identically, inside recreateSwapchainAndDependents.
+ */
+VklSwapchainConfig buildSwapchainConfig(
+    VkSwapchainKHR vk_swapchain,
+    const std::vector<VkImage>& swapchain_image_handles,
+    VkExtent2D image_extent,
+    VkFormat image_format,
+    VkImageUsageFlags image_usage,
+    VkClearValue color_clear_value,
+    bool depthtest,
+    VkImage depth_buffer,
+    VkClearValue depth_clear_value
+);
+
+/*!
+ *	Initializes Dear ImGui's GLFW and Vulkan backends against the already-initialized framework
+ *	(needs vklGetRenderpass(), so must run after vklInitFramework()).
+ */
+void initImGui(
+    GLFWwindow* window,
+    VkInstance vk_instance,
+    VkPhysicalDevice vk_physical_device,
+    VkDevice vk_device,
+    uint32_t selected_queue_family_index,
+    VkQueue vk_queue,
+    uint32_t min_image_count,
+    uint32_t image_count
+);
 
 /*!
  *	Allocates a new descriptor set of the given layout from the given descriptor pool.
@@ -783,15 +880,14 @@ int main() {
     VKL_LOG(WELCOME_MSG);
 
     AppSettings settings = loadSettings();
+    VKL_LOG("Settings loaded from assets/settings/settings.ini.");
+
     int window_width = settings.window_width;
     int window_height = settings.window_height;
 
     // Install a callback function, which gets invoked whenever a GLFW error occurred.
     glfwSetErrorCallback(errorCallbackFromGlfw);
 
-    /* --------------------------------------------- */
-    // Create a Window with GLFW
-    /* --------------------------------------------- */
     if (!glfwInit()) {
         VKL_EXIT_WITH_ERROR("Failed to init GLFW");
     }
@@ -809,238 +905,37 @@ int main() {
     window = glfwCreateWindow(window_width, window_height, settings.window_title.c_str(), nullptr, nullptr);
 
     if (!window) {
-        VKL_LOG("If your program reaches this point, that means two things:");
-        VKL_LOG("1) Project setup was successful. Everything is working fine.");
-        VKL_LOG("2) You haven't implemented Subtask 1.2, which is creating a window with GLFW.");
         VKL_EXIT_WITH_ERROR("No GLFW window created.");
     }
     glfwSetWindowPos(window, monitor_x, monitor_y);
-    VKL_LOG("Subtask 1.2 done.");
+    VKL_LOG("Window created.");
 
-    VkResult result;
-    VkInstance vk_instance = VK_NULL_HANDLE;
-    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
-    VkPhysicalDevice vk_physical_device = VK_NULL_HANDLE;
-    VkDevice vk_device = VK_NULL_HANDLE;
-    VkQueue vk_queue = VK_NULL_HANDLE;
-    VkSwapchainKHR vk_swapchain = VK_NULL_HANDLE;
+    VkInstance vk_instance = createVulkanInstance();
+    VKL_LOG("Vulkan instance created.");
 
-    /* --------------------------------------------- */
-    // Create a Vulkan Instance
-    /* --------------------------------------------- */
-    VkApplicationInfo application_info = {};                     // Zero-initialize every member
-    application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO; // Set this struct instance's type
-    application_info.pEngineName = "Kimsis_Engine_Terrain_generator";
-    application_info.engineVersion = VK_MAKE_API_VERSION(0, 2023, 9, 1);
-    application_info.pApplicationName = "Kimsis_Engine_Terrain";
-    application_info.applicationVersion = VK_MAKE_API_VERSION(0, 2023, 9, 19);
-    application_info.apiVersion = VK_API_VERSION_1_1; // Your system needs to support this Vulkan API version.
+    VkSurfaceKHR vk_surface = createWindowSurface(vk_instance, window);
+    VKL_LOG("Window surface created.");
 
-    VkInstanceCreateInfo instance_create_info = {};                      // Zero-initialize every member
-    instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO; // Set the struct's type
-    instance_create_info.pApplicationInfo = &application_info;
-
-    // A vector to hold all our requested instance extensions:
-    std::vector<const char*> instance_extensions = getRequiredInstanceExtensions();
-
-    // Set info in the VkInstanceCreateInfo struct:
-    instance_create_info.enabledExtensionCount = instance_extensions.size();
-    instance_create_info.ppEnabledExtensionNames = instance_extensions.data();
-
-    // A vector to hold all our requested validation layers, add standard validation, and set info in the VkInstanceCreateInfo struct:
-    std::vector<const char*> enabled_layer_names;
-    addValidationLayerNameToVectorIfSupported("VK_LAYER_KHRONOS_validation", enabled_layer_names);
-    instance_create_info.enabledLayerCount = enabled_layer_names.size();
-    instance_create_info.ppEnabledLayerNames = enabled_layer_names.data();
-#ifdef __APPLE__
-    instance_create_info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-#endif
-
-    // Create the instance
-    result = vkCreateInstance(&instance_create_info, nullptr, &vk_instance);
-    VKL_CHECK_VULKAN_RESULT(result);
-    if (!vk_instance) {
-        VKL_EXIT_WITH_ERROR("No VkInstance created or handle not assigned.");
-    }
-    VKL_LOG("Subtask 1.3 done.");
-
-    /* --------------------------------------------- */
-    // Create a Vulkan Window Surface
-    /* --------------------------------------------- */
-    result = glfwCreateWindowSurface(vk_instance, window, nullptr, &vk_surface);
-    VKL_CHECK_VULKAN_RESULT(result);
-    if (!vk_surface) {
-        VKL_EXIT_WITH_ERROR("No VkSurfaceKHR created or handle not assigned.");
-    }
-    VKL_LOG("Subtask 1.4 done.");
-
-    /* --------------------------------------------- */
-    // Pick a Physical Device
-    /* --------------------------------------------- */
-    // Query the number of physical devices:
-    uint32_t physical_devices_count;
-    vkEnumeratePhysicalDevices(vk_instance, &physical_devices_count, nullptr);
-
-    if (physical_devices_count == 0) {
-        VKL_EXIT_WITH_ERROR("Vulkan does not recognize any physical devices.");
-    }
-
-    std::vector<VkPhysicalDevice> physical_devices(physical_devices_count);
-    vkEnumeratePhysicalDevices(vk_instance, &physical_devices_count, physical_devices.data());
-
-    uint32_t selected_physical_device_index = selectPhysicalDeviceIndex(physical_devices, vk_surface);
-    vk_physical_device = physical_devices[selected_physical_device_index];
-    if (!vk_physical_device) {
-        VKL_EXIT_WITH_ERROR("No VkPhysicalDevice selected or handle not assigned.");
-    }
-    VKL_LOG("Subtask 1.5 done.");
-
-    /* --------------------------------------------- */
-    // Select a Queue Family
-    /* --------------------------------------------- */
-    std::array<float, 1> queue_priorities = {1.0f};
+    VkPhysicalDevice vk_physical_device = pickPhysicalDevice(vk_instance, vk_surface);
+    VkPhysicalDeviceProperties physical_device_properties;
+    vkGetPhysicalDeviceProperties(vk_physical_device, &physical_device_properties);
+    VKL_LOG("Physical device selected: " << physical_device_properties.deviceName);
 
     uint32_t selected_queue_family_index = selectQueueFamilyIndex(vk_physical_device, vk_surface);
-    VkDeviceQueueCreateInfo device_queue_create_info = {};
-    device_queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    device_queue_create_info.queueFamilyIndex = selected_queue_family_index;
-    device_queue_create_info.queueCount = 1u;
-    device_queue_create_info.pQueuePriorities = queue_priorities.data();
+    VkDeviceQueueCreateInfo device_queue_create_info = createQueueCreateInfo(vk_physical_device, selected_queue_family_index);
+    VKL_LOG("Queue family " << selected_queue_family_index << " selected.");
 
-    // Sanity check if we have selected a valid queue family index:
-    uint32_t queue_family_count = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(vk_physical_device, &queue_family_count, nullptr);
-    if (selected_queue_family_index >= queue_family_count) {
-        VKL_EXIT_WITH_ERROR("Invalid queue family index selected.");
-    }
-    VKL_LOG("Subtask 1.6 done.");
+    VkQueue vk_queue = VK_NULL_HANDLE;
+    VkDevice vk_device = createLogicalDeviceAndQueue(vk_physical_device, device_queue_create_info, selected_queue_family_index, vk_queue);
+    VKL_LOG("Logical device and queue created.");
 
-    /* --------------------------------------------- */
-    // Create a Logical Device and Get Queue
-    /* --------------------------------------------- */
-    std::vector<const char*> device_extensions;
-    addDeviceExtensionToVectorIfSupported(VK_KHR_SWAPCHAIN_EXTENSION_NAME, vk_physical_device, device_extensions);
-    addDeviceExtensionToVectorIfSupported(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, vk_physical_device, device_extensions);
-    // Looks like SDK 1.2.170 also requires
-    addDeviceExtensionToVectorIfSupported(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME, vk_physical_device, device_extensions);
-    // See if this device supports Synchronization2, and if so, set a flag to indicate that we are going to use Synchronization2:
-    if (std::find(std::begin(device_extensions), std::end(device_extensions), std::string(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME)) !=
-        std::end(device_extensions)) {
-        g_synchronization2_supported = true;
-    }
-#ifdef __APPLE__
-    addDeviceExtensionToVectorIfSupported("VK_KHR_portability_subset", vk_physical_device, device_extensions);
-#endif
-
-    VkDeviceCreateInfo device_create_info = {};
-    device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    // Add information about queues to be created, and extensions to be enabled:
-    device_create_info.queueCreateInfoCount = 1u;
-    device_create_info.pQueueCreateInfos = &device_queue_create_info;
-    device_create_info.enabledExtensionCount = device_extensions.size();
-    device_create_info.ppEnabledExtensionNames = device_extensions.data();
-
-    VkPhysicalDeviceFeatures enabled_physical_device_features = {};
-    enabled_physical_device_features.fillModeNonSolid = VK_TRUE;
-    device_create_info.pEnabledFeatures = &enabled_physical_device_features;
-
-    // Enable Synchronization2 and hook it into the pNext chain:
-    VkPhysicalDeviceSynchronization2FeaturesKHR physical_device_sync2_features = {};
-    physical_device_sync2_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR;
-    physical_device_sync2_features.synchronization2 = VK_TRUE;
-    if (g_synchronization2_supported) {
-        device_create_info.pNext = &physical_device_sync2_features;
-    }
-
-    // Create the logical device
-    result = vkCreateDevice(vk_physical_device, &device_create_info, nullptr, &vk_device);
-    VKL_CHECK_VULKAN_RESULT(result);
-
-    if (g_synchronization2_supported) {
-        auto* procAddr = vkGetDeviceProcAddr(vk_device, "vkCmdPipelineBarrier2KHR");
-        if (procAddr == nullptr) {
-            // Couldn't get the function pointer to vkCmdPipelineBarrier2KHR
-            g_synchronization2_supported = false;
-        } else {
-            g_vkCmdPipelineBarrier2KHR = reinterpret_cast<PFN_vkCmdPipelineBarrier2KHR>(procAddr);
-        }
-    }
-    if (!vk_device) {
-        VKL_EXIT_WITH_ERROR("No VkDevice created or handle not assigned.");
-    }
-
-    // Get the handle of the queue that was requested:
-    vkGetDeviceQueue(vk_device, selected_queue_family_index, 0u, &vk_queue);
-    if (!vk_queue) {
-        VKL_EXIT_WITH_ERROR("No VkQueue selected or handle not assigned.");
-    }
-    VKL_LOG("Subtask 1.7 done.");
-
-    /* --------------------------------------------- */
-    // Create a Swapchain
-    /* --------------------------------------------- */
-    uint32_t queueFamilyIndexCount = 0u;
-    std::vector<uint32_t> queueFamilyIndices;
-    VkSurfaceFormatKHR surface_format = getSurfaceImageFormat(vk_physical_device, vk_surface);
-    queueFamilyIndices.push_back(selected_queue_family_index);
-    queueFamilyIndexCount = 1u;
-    VkSurfaceCapabilitiesKHR surface_capabilities = getPhysicalDeviceSurfaceCapabilities(vk_physical_device, vk_surface);
-    // Clamp to what the surface actually reports; the window manager doesn't always honor the
-    // requested width/height exactly.
-    if (surface_capabilities.currentExtent.width != UINT32_MAX) {
-        window_width = static_cast<int>(surface_capabilities.currentExtent.width);
-        window_height = static_cast<int>(surface_capabilities.currentExtent.height);
-    } else {
-        window_width = static_cast<int>(
-            std::clamp(static_cast<uint32_t>(window_width), surface_capabilities.minImageExtent.width, surface_capabilities.maxImageExtent.width)
-        );
-        window_height = static_cast<int>(
-            std::clamp(static_cast<uint32_t>(window_height), surface_capabilities.minImageExtent.height, surface_capabilities.maxImageExtent.height)
-        );
-    }
+    SwapchainSetup swapchain_setup =
+        createSwapchain(vk_physical_device, vk_surface, vk_device, selected_queue_family_index, window_width, window_height);
+    VkSwapchainKHR vk_swapchain = swapchain_setup.swapchain;
+    VkSurfaceFormatKHR surface_format = swapchain_setup.surface_format;
+    std::vector<VkImage>& swapchain_image_handles = swapchain_setup.image_handles;
     float aspect_ratio = static_cast<float>(window_width) / static_cast<float>(window_height);
-    // Build the swapchain config struct:
-    VkSwapchainCreateInfoKHR swapchain_create_info = {};
-    swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    swapchain_create_info.surface = vk_surface;
-    swapchain_create_info.minImageCount = surface_capabilities.minImageCount;
-    swapchain_create_info.imageArrayLayers = 1u;
-    swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    if (surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
-        swapchain_create_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    } else {
-        std::cout << "Warning: Automatic Testing might fail, VK_IMAGE_USAGE_TRANSFER_SRC_BIT image usage is not supported" << std::endl;
-    }
-    swapchain_create_info.preTransform = surface_capabilities.currentTransform;
-    swapchain_create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    swapchain_create_info.clipped = VK_TRUE;
-    swapchain_create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    swapchain_create_info.queueFamilyIndexCount = queueFamilyIndexCount;
-    swapchain_create_info.pQueueFamilyIndices = queueFamilyIndices.data();
-    swapchain_create_info.imageFormat = surface_format.format;
-    swapchain_create_info.imageColorSpace = surface_format.colorSpace;
-    swapchain_create_info.imageExtent = VkExtent2D{static_cast<uint32_t>(window_width), static_cast<uint32_t>(window_height)};
-    swapchain_create_info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
-
-    // Create the swapchain:
-    result = vkCreateSwapchainKHR(vk_device, &swapchain_create_info, nullptr, &vk_swapchain);
-    VKL_CHECK_VULKAN_RESULT(result);
-    if (!vk_swapchain) {
-        VKL_EXIT_WITH_ERROR("No VkSwapchainKHR created or handle not assigned.");
-    }
-
-    // Query how many swapchain images we got:
-    uint32_t swapchain_image_count;
-    vkGetSwapchainImagesKHR(vk_device, vk_swapchain, &swapchain_image_count, nullptr);
-
-    // Retrieve the swapchain images:
-    std::vector<VkImage> swapchain_image_handles(swapchain_image_count);
-    vkGetSwapchainImagesKHR(vk_device, vk_swapchain, &swapchain_image_count, swapchain_image_handles.data());
-    VKL_LOG("Subtask 1.8 done.");
-
-    /* --------------------------------------------- */
-    // Camera
-    /* --------------------------------------------- */
+    VKL_LOG("Swapchain created with " << swapchain_image_handles.size() << " images.");
 
     // Create a camera helper object, positioned/oriented per camera_terrain.ini. The trackball
     // camera's target is derived by raycasting the configured position/direction against the
@@ -1051,29 +946,14 @@ int main() {
     auto initial_hit = raycastTerrain(flyCamera.getPosition(), flyCamera.getForward());
     TrackballCamera trackballCamera(flyCamera, initial_hit.has_value() ? initial_hit->point : glm::vec3(0.0f, 0.0f, 0.0f));
     Camera* activeCamera = &trackballCamera;
+    VKL_LOG("Cameras initialized (starting in trackball mode).");
 
-    /* --------------------------------------------- */
-    // Depth Test
-    /* --------------------------------------------- */
-    VkImage depth_buffer = vklCreateDeviceLocalImageWithBackingMemory(
-        vk_physical_device,
-        vk_device,
-        window_width,
-        window_height,
-        VK_FORMAT_D32_SFLOAT,
-        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
-    );
+    VkImage depth_buffer = createDepthBuffer(vk_physical_device, vk_device, window_width, window_height);
 
     VkClearValue depth_clear_value;
     depth_clear_value.depthStencil.depth = 1.0f;
     depth_clear_value.depthStencil.stencil = 0u;
-
-    /* --------------------------------------------- */
-    // Init Framework
-    /* --------------------------------------------- */
-
-    // Gather swapchain config as required by the framework:
-    VklSwapchainConfig swapchain_config = {};
+    VKL_LOG("Depth buffer created (" << window_width << "x" << window_height << ").");
 
     VkClearValue color_clear_value;
     color_clear_value.color.float32[0] = settings.background_r;
@@ -1081,57 +961,36 @@ int main() {
     color_clear_value.color.float32[2] = settings.background_b;
     color_clear_value.color.float32[3] = 1.0f;
 
-    swapchain_config.swapchainHandle = vk_swapchain;
-    swapchain_config.imageExtent = swapchain_create_info.imageExtent;
-    for (const VkImage& img : swapchain_image_handles) {
-        VklSwapchainFramebufferComposition framebufferComposition;
-        framebufferComposition.colorAttachmentImageDetails.imageHandle = img;
-        framebufferComposition.colorAttachmentImageDetails.imageFormat = swapchain_create_info.imageFormat;
-        framebufferComposition.colorAttachmentImageDetails.imageUsage = swapchain_create_info.imageUsage;
-        framebufferComposition.colorAttachmentImageDetails.clearValue = color_clear_value;
-        if (settings.depthtest) {
-            // If we also set the data of the depth buffer, our framebuffer will consist of two images:
-            framebufferComposition.depthAttachmentImageDetails.imageHandle = depth_buffer;
-            framebufferComposition.depthAttachmentImageDetails.imageFormat = VK_FORMAT_D32_SFLOAT;
-            framebufferComposition.depthAttachmentImageDetails.imageUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-            framebufferComposition.depthAttachmentImageDetails.clearValue = depth_clear_value;
-        }
-        swapchain_config.swapchainImages.push_back(framebufferComposition);
-    }
+    VklSwapchainConfig swapchain_config = buildSwapchainConfig(
+        vk_swapchain,
+        swapchain_image_handles,
+        VkExtent2D{static_cast<uint32_t>(window_width), static_cast<uint32_t>(window_height)},
+        surface_format.format,
+        swapchain_setup.image_usage,
+        color_clear_value,
+        settings.depthtest,
+        depth_buffer,
+        depth_clear_value
+    );
 
     // Init the framework:
     if (!vklInitFramework(vk_instance, vk_surface, vk_physical_device, vk_device, vk_queue, swapchain_config)) {
         VKL_EXIT_WITH_ERROR("Failed to init framework");
     }
-    VKL_LOG("Subtask 1.9 done.");
+    VKL_LOG("Vulkan framework initialized.");
 
-    /* --------------------------------------------- */
-    // Dear ImGui: init
-    /* --------------------------------------------- */
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGui::StyleColorsDark();
+    initImGui(
+        window,
+        vk_instance,
+        vk_physical_device,
+        vk_device,
+        selected_queue_family_index,
+        vk_queue,
+        swapchain_setup.surface_capabilities.minImageCount,
+        static_cast<uint32_t>(swapchain_image_handles.size())
+    );
+    VKL_LOG("Dear ImGui initialized.");
 
-    ImGui_ImplGlfw_InitForVulkan(window, /*install_callbacks=*/false);
-
-    ImGui_ImplVulkan_InitInfo imgui_init_info = {};
-    imgui_init_info.ApiVersion = application_info.apiVersion;
-    imgui_init_info.Instance = vk_instance;
-    imgui_init_info.PhysicalDevice = vk_physical_device;
-    imgui_init_info.Device = vk_device;
-    imgui_init_info.QueueFamily = selected_queue_family_index;
-    imgui_init_info.Queue = vk_queue;
-    imgui_init_info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
-    imgui_init_info.MinImageCount = surface_capabilities.minImageCount;
-    imgui_init_info.ImageCount = swapchain_image_count;
-    imgui_init_info.PipelineInfoMain.RenderPass = vklGetRenderpass();
-    imgui_init_info.PipelineInfoMain.Subpass = 0u;
-    imgui_init_info.MinAllocationSize = 1024u * 1024u;
-    ImGui_ImplVulkan_Init(&imgui_init_info);
-
-    /* --------------------------------------------- */
-    // Set up the Scene
-    /* --------------------------------------------- */
     TerrainParams initial_terrain_params;
     initial_terrain_params.hurst = settings.initial_hurst;
     initial_terrain_params.seed = settings.initial_seed;
@@ -1145,9 +1004,13 @@ int main() {
         settings.initial_roughness,
         settings.initial_water_level
     );
+    VKL_LOG("Terrain scene set up (hurst=" << initial_terrain_params.hurst << ", seed=" << initial_terrain_params.seed << ").");
+
     generateTerrainGeometryWithLoadingScreen(vk_device, terrain_scene.chunkManager, activeCamera->getPosition());
+    VKL_LOG("Initial terrain chunks loaded (" << terrain_scene.chunkManager.loadedChunks.size() << " chunks).");
 
     WaterScene water_scene = setupWaterScene(vk_device, initial_terrain_params);
+    VKL_LOG("Water scene set up.");
 
     // Callback function for handling mouse button events:
     glfwSetMouseButtonCallback(window, mouseButtonCallbackFromGlfw);
@@ -1157,11 +1020,6 @@ int main() {
 
     // Callback function for handling window resize events:
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallbackFromGlfw);
-
-    /* --------------------------------------------- */
-    // Set-up the Render Loop
-    // Register a Key Callback
-    /* --------------------------------------------- */
 
     glfwSetKeyCallback(window, handleGlfwKeyCallback);
 
@@ -1189,6 +1047,7 @@ int main() {
         depth_clear_value
     };
 
+    VKL_LOG("Entering render loop.");
     while (!glfwWindowShouldClose(window)) {
         double currentFrameTime = glfwGetTime();
         float dt = static_cast<float>(currentFrameTime - lastFrameTime);
@@ -1271,6 +1130,7 @@ int main() {
             continue;
         }
     }
+    VKL_LOG("Render loop exited, shutting down.");
 
     // Wait for all GPU work to finish before cleaning up:
     vkDeviceWaitIdle(vk_device);
@@ -1280,16 +1140,11 @@ int main() {
     cleanupTerrainScene(vk_device, terrain_scene);
     cleanupWaterScene(vk_device, water_scene);
 
-    /* --------------------------------------------- */
-    // Dear ImGui: shutdown
-    /* --------------------------------------------- */
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
+    VKL_LOG("Dear ImGui shut down.");
 
-    /* --------------------------------------------- */
-    // Cleanup
-    /* --------------------------------------------- */
     vklDestroyFramework();
     vkDestroySwapchainKHR(vk_device, vk_swapchain, nullptr);
     vkDestroyDevice(vk_device, nullptr);
@@ -1298,6 +1153,7 @@ int main() {
     glfwDestroyWindow(window);
     glfwTerminate();
 
+    VKL_LOG("Shutdown complete.");
     return EXIT_SUCCESS;
 }
 
@@ -1306,6 +1162,305 @@ int main() {
 /* --------------------------------------------- */
 
 void errorCallbackFromGlfw(int error, const char* description) { std::cout << "GLFW error " << error << ": " << description << std::endl; }
+
+VkInstance createVulkanInstance() {
+    VkApplicationInfo application_info = {};                     // Zero-initialize every member
+    application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO; // Set this struct instance's type
+    application_info.pEngineName = "Kimsis_Engine_Terrain_generator";
+    application_info.engineVersion = VK_MAKE_API_VERSION(0, 2023, 9, 1);
+    application_info.pApplicationName = "Kimsis_Engine_Terrain";
+    application_info.applicationVersion = VK_MAKE_API_VERSION(0, 2023, 9, 19);
+    application_info.apiVersion = VK_API_VERSION_1_1; // Your system needs to support this Vulkan API version.
+
+    VkInstanceCreateInfo instance_create_info = {};                      // Zero-initialize every member
+    instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO; // Set the struct's type
+    instance_create_info.pApplicationInfo = &application_info;
+
+    // A vector to hold all our requested instance extensions:
+    std::vector<const char*> instance_extensions = getRequiredInstanceExtensions();
+
+    // Set info in the VkInstanceCreateInfo struct:
+    instance_create_info.enabledExtensionCount = instance_extensions.size();
+    instance_create_info.ppEnabledExtensionNames = instance_extensions.data();
+
+    // A vector to hold all our requested validation layers, add standard validation, and set info in the VkInstanceCreateInfo struct:
+    std::vector<const char*> enabled_layer_names;
+    addValidationLayerNameToVectorIfSupported("VK_LAYER_KHRONOS_validation", enabled_layer_names);
+    instance_create_info.enabledLayerCount = enabled_layer_names.size();
+    instance_create_info.ppEnabledLayerNames = enabled_layer_names.data();
+#ifdef __APPLE__
+    instance_create_info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+
+    VkInstance vk_instance = VK_NULL_HANDLE;
+    VkResult result = vkCreateInstance(&instance_create_info, nullptr, &vk_instance);
+    VKL_CHECK_VULKAN_RESULT(result);
+    if (!vk_instance) {
+        VKL_EXIT_WITH_ERROR("No VkInstance created or handle not assigned.");
+    }
+    return vk_instance;
+}
+
+VkSurfaceKHR createWindowSurface(VkInstance vk_instance, GLFWwindow* window) {
+    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
+    VkResult result = glfwCreateWindowSurface(vk_instance, window, nullptr, &vk_surface);
+    VKL_CHECK_VULKAN_RESULT(result);
+    if (!vk_surface) {
+        VKL_EXIT_WITH_ERROR("No VkSurfaceKHR created or handle not assigned.");
+    }
+    return vk_surface;
+}
+
+VkPhysicalDevice pickPhysicalDevice(VkInstance vk_instance, VkSurfaceKHR vk_surface) {
+    // Query the number of physical devices:
+    uint32_t physical_devices_count;
+    vkEnumeratePhysicalDevices(vk_instance, &physical_devices_count, nullptr);
+
+    if (physical_devices_count == 0) {
+        VKL_EXIT_WITH_ERROR("Vulkan does not recognize any physical devices.");
+    }
+
+    std::vector<VkPhysicalDevice> physical_devices(physical_devices_count);
+    vkEnumeratePhysicalDevices(vk_instance, &physical_devices_count, physical_devices.data());
+
+    uint32_t selected_physical_device_index = selectPhysicalDeviceIndex(physical_devices, vk_surface);
+    VkPhysicalDevice vk_physical_device = physical_devices[selected_physical_device_index];
+    if (!vk_physical_device) {
+        VKL_EXIT_WITH_ERROR("No VkPhysicalDevice selected or handle not assigned.");
+    }
+    return vk_physical_device;
+}
+
+VkDeviceQueueCreateInfo createQueueCreateInfo(VkPhysicalDevice vk_physical_device, uint32_t selected_queue_family_index) {
+    // Fixed storage duration so the returned struct's pQueuePriorities pointer stays valid for as
+    // long as the caller keeps using it (a plain local array here would dangle once this function
+    // returns) — safe since the priority value itself never varies.
+    static constexpr std::array<float, 1> kQueuePriorities = {1.0f};
+
+    VkDeviceQueueCreateInfo device_queue_create_info = {};
+    device_queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    device_queue_create_info.queueFamilyIndex = selected_queue_family_index;
+    device_queue_create_info.queueCount = 1u;
+    device_queue_create_info.pQueuePriorities = kQueuePriorities.data();
+
+    // Sanity check if we have selected a valid queue family index:
+    uint32_t queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(vk_physical_device, &queue_family_count, nullptr);
+    if (selected_queue_family_index >= queue_family_count) {
+        VKL_EXIT_WITH_ERROR("Invalid queue family index selected.");
+    }
+    return device_queue_create_info;
+}
+
+VkDevice createLogicalDeviceAndQueue(
+    VkPhysicalDevice vk_physical_device,
+    const VkDeviceQueueCreateInfo& device_queue_create_info,
+    uint32_t selected_queue_family_index,
+    VkQueue& out_vk_queue
+) {
+    std::vector<const char*> device_extensions;
+    addDeviceExtensionToVectorIfSupported(VK_KHR_SWAPCHAIN_EXTENSION_NAME, vk_physical_device, device_extensions);
+    addDeviceExtensionToVectorIfSupported(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, vk_physical_device, device_extensions);
+    // Looks like SDK 1.2.170 also requires
+    addDeviceExtensionToVectorIfSupported(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME, vk_physical_device, device_extensions);
+    // See if this device supports Synchronization2, and if so, set a flag to indicate that we are going to use Synchronization2:
+    if (std::find(std::begin(device_extensions), std::end(device_extensions), std::string(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME)) !=
+        std::end(device_extensions)) {
+        g_synchronization2_supported = true;
+    }
+#ifdef __APPLE__
+    addDeviceExtensionToVectorIfSupported("VK_KHR_portability_subset", vk_physical_device, device_extensions);
+#endif
+
+    VkDeviceCreateInfo device_create_info = {};
+    device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    // Add information about queues to be created, and extensions to be enabled:
+    device_create_info.queueCreateInfoCount = 1u;
+    device_create_info.pQueueCreateInfos = &device_queue_create_info;
+    device_create_info.enabledExtensionCount = device_extensions.size();
+    device_create_info.ppEnabledExtensionNames = device_extensions.data();
+
+    VkPhysicalDeviceFeatures enabled_physical_device_features = {};
+    enabled_physical_device_features.fillModeNonSolid = VK_TRUE;
+    device_create_info.pEnabledFeatures = &enabled_physical_device_features;
+
+    // Enable Synchronization2 and hook it into the pNext chain:
+    VkPhysicalDeviceSynchronization2FeaturesKHR physical_device_sync2_features = {};
+    physical_device_sync2_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR;
+    physical_device_sync2_features.synchronization2 = VK_TRUE;
+    if (g_synchronization2_supported) {
+        device_create_info.pNext = &physical_device_sync2_features;
+    }
+
+    // Create the logical device
+    VkDevice vk_device = VK_NULL_HANDLE;
+    VkResult result = vkCreateDevice(vk_physical_device, &device_create_info, nullptr, &vk_device);
+    VKL_CHECK_VULKAN_RESULT(result);
+
+    if (g_synchronization2_supported) {
+        auto* procAddr = vkGetDeviceProcAddr(vk_device, "vkCmdPipelineBarrier2KHR");
+        if (procAddr == nullptr) {
+            // Couldn't get the function pointer to vkCmdPipelineBarrier2KHR
+            g_synchronization2_supported = false;
+        } else {
+            g_vkCmdPipelineBarrier2KHR = reinterpret_cast<PFN_vkCmdPipelineBarrier2KHR>(procAddr);
+        }
+    }
+    if (!vk_device) {
+        VKL_EXIT_WITH_ERROR("No VkDevice created or handle not assigned.");
+    }
+
+    // Get the handle of the queue that was requested:
+    vkGetDeviceQueue(vk_device, selected_queue_family_index, 0u, &out_vk_queue);
+    if (!out_vk_queue) {
+        VKL_EXIT_WITH_ERROR("No VkQueue selected or handle not assigned.");
+    }
+    return vk_device;
+}
+
+SwapchainSetup createSwapchain(
+    VkPhysicalDevice vk_physical_device,
+    VkSurfaceKHR vk_surface,
+    VkDevice vk_device,
+    uint32_t selected_queue_family_index,
+    int& window_width,
+    int& window_height
+) {
+    SwapchainSetup setup{};
+    setup.surface_format = getSurfaceImageFormat(vk_physical_device, vk_surface);
+    setup.surface_capabilities = getPhysicalDeviceSurfaceCapabilities(vk_physical_device, vk_surface);
+
+    // Clamp to what the surface actually reports; the window manager doesn't always honor the
+    // requested width/height exactly.
+    if (setup.surface_capabilities.currentExtent.width != UINT32_MAX) {
+        window_width = static_cast<int>(setup.surface_capabilities.currentExtent.width);
+        window_height = static_cast<int>(setup.surface_capabilities.currentExtent.height);
+    } else {
+        window_width = static_cast<int>(std::clamp(
+            static_cast<uint32_t>(window_width),
+            setup.surface_capabilities.minImageExtent.width,
+            setup.surface_capabilities.maxImageExtent.width
+        ));
+        window_height = static_cast<int>(std::clamp(
+            static_cast<uint32_t>(window_height),
+            setup.surface_capabilities.minImageExtent.height,
+            setup.surface_capabilities.maxImageExtent.height
+        ));
+    }
+
+    std::vector<uint32_t> queueFamilyIndices = {selected_queue_family_index};
+
+    // Build the swapchain config struct:
+    VkSwapchainCreateInfoKHR swapchain_create_info = {};
+    swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapchain_create_info.surface = vk_surface;
+    swapchain_create_info.minImageCount = setup.surface_capabilities.minImageCount;
+    swapchain_create_info.imageArrayLayers = 1u;
+    swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchain_create_info.preTransform = setup.surface_capabilities.currentTransform;
+    swapchain_create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapchain_create_info.clipped = VK_TRUE;
+    swapchain_create_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swapchain_create_info.queueFamilyIndexCount = static_cast<uint32_t>(queueFamilyIndices.size());
+    swapchain_create_info.pQueueFamilyIndices = queueFamilyIndices.data();
+    swapchain_create_info.imageFormat = setup.surface_format.format;
+    swapchain_create_info.imageColorSpace = setup.surface_format.colorSpace;
+    swapchain_create_info.imageExtent = VkExtent2D{static_cast<uint32_t>(window_width), static_cast<uint32_t>(window_height)};
+    swapchain_create_info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+
+    // Create the swapchain:
+    VkResult result = vkCreateSwapchainKHR(vk_device, &swapchain_create_info, nullptr, &setup.swapchain);
+    VKL_CHECK_VULKAN_RESULT(result);
+    if (!setup.swapchain) {
+        VKL_EXIT_WITH_ERROR("No VkSwapchainKHR created or handle not assigned.");
+    }
+    setup.image_usage = swapchain_create_info.imageUsage;
+
+    // Query how many swapchain images we got:
+    uint32_t swapchain_image_count;
+    vkGetSwapchainImagesKHR(vk_device, setup.swapchain, &swapchain_image_count, nullptr);
+
+    // Retrieve the swapchain images:
+    setup.image_handles.resize(swapchain_image_count);
+    vkGetSwapchainImagesKHR(vk_device, setup.swapchain, &swapchain_image_count, setup.image_handles.data());
+
+    return setup;
+}
+
+VkImage createDepthBuffer(VkPhysicalDevice vk_physical_device, VkDevice vk_device, int width, int height) {
+    return vklCreateDeviceLocalImageWithBackingMemory(
+        vk_physical_device,
+        vk_device,
+        width,
+        height,
+        VK_FORMAT_D32_SFLOAT,
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+    );
+}
+
+VklSwapchainConfig buildSwapchainConfig(
+    VkSwapchainKHR vk_swapchain,
+    const std::vector<VkImage>& swapchain_image_handles,
+    VkExtent2D image_extent,
+    VkFormat image_format,
+    VkImageUsageFlags image_usage,
+    VkClearValue color_clear_value,
+    bool depthtest,
+    VkImage depth_buffer,
+    VkClearValue depth_clear_value
+) {
+    VklSwapchainConfig swapchain_config = {};
+    swapchain_config.swapchainHandle = vk_swapchain;
+    swapchain_config.imageExtent = image_extent;
+    for (const VkImage& img : swapchain_image_handles) {
+        VklSwapchainFramebufferComposition framebufferComposition;
+        framebufferComposition.colorAttachmentImageDetails.imageHandle = img;
+        framebufferComposition.colorAttachmentImageDetails.imageFormat = image_format;
+        framebufferComposition.colorAttachmentImageDetails.imageUsage = image_usage;
+        framebufferComposition.colorAttachmentImageDetails.clearValue = color_clear_value;
+        if (depthtest) {
+            // If we also set the data of the depth buffer, our framebuffer will consist of two images:
+            framebufferComposition.depthAttachmentImageDetails.imageHandle = depth_buffer;
+            framebufferComposition.depthAttachmentImageDetails.imageFormat = VK_FORMAT_D32_SFLOAT;
+            framebufferComposition.depthAttachmentImageDetails.imageUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+            framebufferComposition.depthAttachmentImageDetails.clearValue = depth_clear_value;
+        }
+        swapchain_config.swapchainImages.push_back(framebufferComposition);
+    }
+    return swapchain_config;
+}
+
+void initImGui(
+    GLFWwindow* window,
+    VkInstance vk_instance,
+    VkPhysicalDevice vk_physical_device,
+    VkDevice vk_device,
+    uint32_t selected_queue_family_index,
+    VkQueue vk_queue,
+    uint32_t min_image_count,
+    uint32_t image_count
+) {
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+
+    ImGui_ImplGlfw_InitForVulkan(window, /*install_callbacks=*/false);
+
+    ImGui_ImplVulkan_InitInfo imgui_init_info = {};
+    imgui_init_info.ApiVersion = VK_API_VERSION_1_1;
+    imgui_init_info.Instance = vk_instance;
+    imgui_init_info.PhysicalDevice = vk_physical_device;
+    imgui_init_info.Device = vk_device;
+    imgui_init_info.QueueFamily = selected_queue_family_index;
+    imgui_init_info.Queue = vk_queue;
+    imgui_init_info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
+    imgui_init_info.MinImageCount = min_image_count;
+    imgui_init_info.ImageCount = image_count;
+    imgui_init_info.PipelineInfoMain.RenderPass = vklGetRenderpass();
+    imgui_init_info.PipelineInfoMain.Subpass = 0u;
+    imgui_init_info.MinAllocationSize = 1024u * 1024u;
+    ImGui_ImplVulkan_Init(&imgui_init_info);
+}
 
 void recreateSwapchainAndDependents(
     const SwapchainRecreateContext& ctx,
@@ -1351,9 +1506,6 @@ void recreateSwapchainAndDependents(
     new_swapchain_create_info.minImageCount = new_surface_capabilities.minImageCount;
     new_swapchain_create_info.imageArrayLayers = 1u;
     new_swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    if (new_surface_capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) {
-        new_swapchain_create_info.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    }
     new_swapchain_create_info.preTransform = new_surface_capabilities.currentTransform;
     new_swapchain_create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     new_swapchain_create_info.clipped = VK_TRUE;
@@ -1375,32 +1527,19 @@ void recreateSwapchainAndDependents(
     swapchain_image_handles.resize(new_swapchain_image_count);
     vkGetSwapchainImagesKHR(ctx.vk_device, vk_swapchain, &new_swapchain_image_count, swapchain_image_handles.data());
 
-    depth_buffer = vklCreateDeviceLocalImageWithBackingMemory(
-        ctx.vk_physical_device,
-        ctx.vk_device,
-        static_cast<int>(new_extent.width),
-        static_cast<int>(new_extent.height),
-        VK_FORMAT_D32_SFLOAT,
-        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
-    );
+    depth_buffer = createDepthBuffer(ctx.vk_physical_device, ctx.vk_device, static_cast<int>(new_extent.width), static_cast<int>(new_extent.height));
 
-    VklSwapchainConfig new_swapchain_config = {};
-    new_swapchain_config.swapchainHandle = vk_swapchain;
-    new_swapchain_config.imageExtent = new_extent;
-    for (const VkImage& img : swapchain_image_handles) {
-        VklSwapchainFramebufferComposition framebufferComposition;
-        framebufferComposition.colorAttachmentImageDetails.imageHandle = img;
-        framebufferComposition.colorAttachmentImageDetails.imageFormat = new_swapchain_create_info.imageFormat;
-        framebufferComposition.colorAttachmentImageDetails.imageUsage = new_swapchain_create_info.imageUsage;
-        framebufferComposition.colorAttachmentImageDetails.clearValue = ctx.color_clear_value;
-        if (ctx.depthtest) {
-            framebufferComposition.depthAttachmentImageDetails.imageHandle = depth_buffer;
-            framebufferComposition.depthAttachmentImageDetails.imageFormat = VK_FORMAT_D32_SFLOAT;
-            framebufferComposition.depthAttachmentImageDetails.imageUsage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-            framebufferComposition.depthAttachmentImageDetails.clearValue = ctx.depth_clear_value;
-        }
-        new_swapchain_config.swapchainImages.push_back(framebufferComposition);
-    }
+    VklSwapchainConfig new_swapchain_config = buildSwapchainConfig(
+        vk_swapchain,
+        swapchain_image_handles,
+        new_extent,
+        new_swapchain_create_info.imageFormat,
+        new_swapchain_create_info.imageUsage,
+        ctx.color_clear_value,
+        ctx.depthtest,
+        depth_buffer,
+        ctx.depth_clear_value
+    );
 
     if (!vklInitFramework(ctx.vk_instance, ctx.vk_surface, ctx.vk_physical_device, ctx.vk_device, ctx.vk_queue, new_swapchain_config)) {
         VKL_EXIT_WITH_ERROR("Failed to reinit framework after window resize");
