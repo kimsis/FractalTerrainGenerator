@@ -73,7 +73,7 @@ class Camera {
 
 class TrackballCamera : public Camera {
    public:
-    static constexpr float kPanSensitivity = 0.01f;
+    static constexpr float PAN_SENSITIVITY = 0.01f;
     using Camera::Camera;
 
     /*! Converts an existing Camera into a TrackballCamera, carrying position/yaw/pitch/speed/

@@ -16,7 +16,7 @@
 
 // Positions and normals share one buffer (see Geometry::vertexBuffer); normals start at this
 // byte-aligned offset past the positions region.
-static constexpr VkDeviceSize kVertexSubBufferAlignment = 16;
+static constexpr VkDeviceSize VERTEX_SUB_BUFFER_ALIGNMENT = 16;
 
 static VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) { return (value + alignment - 1) / alignment * alignment; }
 
@@ -34,7 +34,7 @@ GeometryData generateTerrainGeometry(const TerrainParams& params) {
 VkDeviceSize uploadVertexDataInPlace(VkBuffer vertexBuffer, const GeometryData& geometry_data) {
     size_t positions_buffer_byte_size = geometry_data.positions.size() * sizeof(geometry_data.positions[0]);
     size_t normals_buffer_byte_size = geometry_data.normals.size() * sizeof(geometry_data.normals[0]);
-    VkDeviceSize normals_offset = alignUp(static_cast<VkDeviceSize>(positions_buffer_byte_size), kVertexSubBufferAlignment);
+    VkDeviceSize normals_offset = alignUp(static_cast<VkDeviceSize>(positions_buffer_byte_size), VERTEX_SUB_BUFFER_ALIGNMENT);
 
     vklCopyDataIntoHostCoherentBuffer(vertexBuffer, 0, geometry_data.positions.data(), positions_buffer_byte_size);
     vklCopyDataIntoHostCoherentBuffer(vertexBuffer, normals_offset, geometry_data.normals.data(), normals_buffer_byte_size);
@@ -53,7 +53,7 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data) {
     // right after (aligned).
     size_t positions_buffer_byte_size = geometry_data.positions.size() * sizeof(geometry_data.positions[0]);
     size_t normals_buffer_byte_size = geometry_data.normals.size() * sizeof(geometry_data.normals[0]);
-    VkDeviceSize normals_offset = alignUp(static_cast<VkDeviceSize>(positions_buffer_byte_size), kVertexSubBufferAlignment);
+    VkDeviceSize normals_offset = alignUp(static_cast<VkDeviceSize>(positions_buffer_byte_size), VERTEX_SUB_BUFFER_ALIGNMENT);
     VkDeviceSize vertex_buffer_byte_size = normals_offset + static_cast<VkDeviceSize>(normals_buffer_byte_size);
 
     result.vertexBuffer =
@@ -76,9 +76,9 @@ void updateGeometryNormals(const Geometry& geometry, const std::vector<glm::vec3
 }
 
 std::optional<Hit> raycastTerrain(const glm::vec3& origin, const glm::vec3& direction) {
-    constexpr float kGroundPlaneZ = 0.0f;
+    constexpr float GROUND_PLANE_Z = 0.0f;
     if (std::abs(direction.z) < 1e-6f) return std::nullopt;
-    float t = (kGroundPlaneZ - origin.z) / direction.z;
+    float t = (GROUND_PLANE_Z - origin.z) / direction.z;
     if (t < 0.0f) return std::nullopt;
     glm::vec3 point = origin + t * direction;
     return Hit{point, t};

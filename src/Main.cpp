@@ -49,7 +49,7 @@ constexpr char WELCOME_MSG[] = ":::::: WELCOME TO MY TERRAIN GENERATOR ::::::";
 constexpr char WINDOW_TITLE[] = "Fractal Terrain Generator";
 
 /*! Fixed width every GUI slider is drawn at, used by labelThenRightAlignedWidget. */
-constexpr float kSliderWidth = 200.0f;
+constexpr float SLIDER_WIDTH = 200.0f;
 
 /* --------------------------------------------- */
 // Helper Function Declarations
@@ -889,7 +889,7 @@ void applyCameraInput(
     if (g_strafing && !g_toggle_camera) {
         glm::vec3 right = trackballCamera.getRight();
         glm::vec3 camUp = trackballCamera.getUp();
-        glm::vec3 worldDelta = (-delta_x * right + delta_y * camUp) * trackballCamera.kPanSensitivity;
+        glm::vec3 worldDelta = (-delta_x * right + delta_y * camUp) * trackballCamera.PAN_SENSITIVITY;
         trackballCamera.translate(worldDelta);
     }
 
@@ -933,26 +933,26 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     ImGui::Text("%s", generation_status_text);
 
     ImGui::BeginDisabled(is_regenerating);
-    labelThenRightAlignedWidget("Hurst Exponent", kSliderWidth);
+    labelThenRightAlignedWidget("Hurst Exponent", SLIDER_WIDTH);
     ImGui::SliderFloat("##hurst", &g_hurst, 0.0f, 1.0f, "%f", flags_for_sliders);
     if (ImGui::IsItemDeactivatedAfterEdit()) {
         g_hurst_changed = true;
     }
     ImGui::EndDisabled();
 
-    labelThenRightAlignedWidget("Height Scale", kSliderWidth);
+    labelThenRightAlignedWidget("Height Scale", SLIDER_WIDTH);
     ImGui::SliderFloat("##heightScale", &scene.heightScale, 0.1f, 5.0f, "%f", flags_for_sliders);
 
-    labelThenRightAlignedWidget("Roughness", kSliderWidth);
+    labelThenRightAlignedWidget("Roughness", SLIDER_WIDTH);
     ImGui::SliderFloat("##roughness", &scene.roughness, 0.0f, 1.0f, "%f", flags_for_sliders);
 
-    labelThenRightAlignedWidget("Water level", kSliderWidth);
+    labelThenRightAlignedWidget("Water level", SLIDER_WIDTH);
     ImGui::SliderFloat("##waterLevel", &scene.waterLevel, -25.0f, 25.0f, "%f", flags_for_sliders);
 
-    labelThenRightAlignedWidget("Camera Speed", kSliderWidth);
+    labelThenRightAlignedWidget("Camera Speed", SLIDER_WIDTH);
     ImGui::SliderFloat("##cameraSpeed", &g_camera_speed, 1.0f, 100.0f, "%f", flags_for_sliders);
 
-    labelThenRightAlignedWidget("View Radius", kSliderWidth);
+    labelThenRightAlignedWidget("View Radius", SLIDER_WIDTH);
     ImGui::SliderInt("##viewRadius", &g_chunk_view_radius, 1, 32, "%d", flags_for_sliders);
     if (ImGui::IsItemDeactivatedAfterEdit()) {
         g_chunk_view_radius_changed = true;

@@ -55,10 +55,10 @@ static VkBuffer otherVertexBuffer(const LoadedChunk& chunk) {
 // Which of coord's 4 neighbors currently have no chunkData (see LoadedChunk::missingNeighborMask).
 static uint8_t missingNeighborMaskFor(const ChunkManager& manager, const ChunkCoord& coord) {
     uint8_t mask = 0;
-    if (!manager.chunkData.count(ChunkCoord{coord.cx - 1, coord.cy})) mask |= kNeighborLeft;
-    if (!manager.chunkData.count(ChunkCoord{coord.cx + 1, coord.cy})) mask |= kNeighborRight;
-    if (!manager.chunkData.count(ChunkCoord{coord.cx, coord.cy + 1})) mask |= kNeighborTop;
-    if (!manager.chunkData.count(ChunkCoord{coord.cx, coord.cy - 1})) mask |= kNeighborBottom;
+    if (!manager.chunkData.count(ChunkCoord{coord.cx - 1, coord.cy})) mask |= NEIGHBOR_LEFT;
+    if (!manager.chunkData.count(ChunkCoord{coord.cx + 1, coord.cy})) mask |= NEIGHBOR_RIGHT;
+    if (!manager.chunkData.count(ChunkCoord{coord.cx, coord.cy + 1})) mask |= NEIGHBOR_TOP;
+    if (!manager.chunkData.count(ChunkCoord{coord.cx, coord.cy - 1})) mask |= NEIGHBOR_BOTTOM;
     return mask;
 }
 
@@ -93,10 +93,10 @@ static std::future<std::vector<glm::vec3>> dispatchNormalDerivation(const ChunkM
     });
 }
 
-// How many updateLoadedChunks calls a PendingDestroy waits before it's actually freed.
-static constexpr int kDestroyDeferralCalls = 2;
-
 void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, double currentTime) {
+    // How many updateLoadedChunks calls a PendingDestroy waits before it's actually freed.
+    static constexpr int DESTROY_DEFERRAL_CALLS = 2;
+
     ChunkCoord center = cameraToChunkCoord(cameraPos, manager.baseParams);
     int destroyRadius = manager.viewRadius + 1;
     int size = (1 << manager.baseParams.gridSizeExponent) + 1;
@@ -131,12 +131,12 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
     // 3. Dispatch phase-2 (normal derivation) for any chunk whose own phase 1 is done and whose every
     // still-relevant neighbor has also finished phase 1. A neighbor outside the view radius will never
     // exist, so it's left as nullptr and deriveTerrainNormals() extrapolates that edge instead.
-    static const ChunkCoord kOffsets[4] = {{-1, 0}, {1, 0}, {0, 1}, {0, -1}}; // left, right, top, bottom
+    static const ChunkCoord OFFSETS[4] = {{-1, 0}, {1, 0}, {0, 1}, {0, -1}}; // left, right, top, bottom
     for (auto it = manager.readyForNormals.begin(); it != manager.readyForNormals.end();) {
         ChunkCoord coord = *it;
 
         bool blockedOnNeighbor = false;
-        for (const ChunkCoord& offset : kOffsets) {
+        for (const ChunkCoord& offset : OFFSETS) {
             ChunkCoord neighbor{coord.cx + offset.cx, coord.cy + offset.cy};
             bool neighborWillExist = isWithinViewRadius(neighbor, center, manager.viewRadius);
             if (neighborWillExist && !manager.chunkData.count(neighbor)) {
@@ -250,8 +250,8 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
             // `to`'s vertex buffer and the chunk's other persistent buffer (if any) are freed here;
             // the index buffer is shared across all chunks, freed only once, at cleanupChunkManager.
             VkBuffer other = otherVertexBuffer(chunk);
-            if (other != VK_NULL_HANDLE) manager.pendingDestroys.push_back({Geometry{other, 0}, kDestroyDeferralCalls});
-            manager.pendingDestroys.push_back({chunk.to, kDestroyDeferralCalls});
+            if (other != VK_NULL_HANDLE) manager.pendingDestroys.push_back({Geometry{other, 0}, DESTROY_DEFERRAL_CALLS});
+            manager.pendingDestroys.push_back({chunk.to, DESTROY_DEFERRAL_CALLS});
             it = manager.loadedChunks.erase(it);
             continue;
         }

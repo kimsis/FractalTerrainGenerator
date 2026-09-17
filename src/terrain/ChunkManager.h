@@ -13,10 +13,10 @@
 
 // Bits into LoadedChunk::missingNeighborMask, one per cardinal direction.
 enum NeighborBit : uint8_t {
-    kNeighborLeft = 1u << 0,
-    kNeighborRight = 1u << 1,
-    kNeighborTop = 1u << 2,
-    kNeighborBottom = 1u << 3,
+    NEIGHBOR_LEFT = 1u << 0,
+    NEIGHBOR_RIGHT = 1u << 1,
+    NEIGHBOR_TOP = 1u << 2,
+    NEIGHBOR_BOTTOM = 1u << 3,
 };
 
 /*!

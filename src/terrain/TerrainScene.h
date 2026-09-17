@@ -10,8 +10,8 @@
 
 constexpr size_t POLYMODES = 2;
 constexpr size_t CULLMODES = 3;
-constexpr VkPolygonMode kTerrainPolygonModes[POLYMODES] = {VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE};
-constexpr VkCullModeFlags kTerrainCullModes[CULLMODES] = {VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT};
+constexpr VkPolygonMode TERRAIN_POLYGON_MODES[POLYMODES] = {VK_POLYGON_MODE_FILL, VK_POLYGON_MODE_LINE};
+constexpr VkCullModeFlags TERRAIN_CULL_MODES[CULLMODES] = {VK_CULL_MODE_NONE, VK_CULL_MODE_BACK_BIT, VK_CULL_MODE_FRONT_BIT};
 
 /*!
  *	It matches the definition and sizes of the corresponding GPU-side struct exactly, which is used in shaders.
@@ -96,10 +96,10 @@ struct TerrainScene {
 
 /*!
  *	Builds (compiles + creates) the terrain pipeline for one (polygon mode, cull mode) combination,
- *	identified by their indices into kTerrainPolygonModes/kTerrainCullModes.
+ *	identified by their indices into TERRAIN_POLYGON_MODES/TERRAIN_CULL_MODES.
  *	@param	scene				The terrain scene to build the pipeline for (shaders, descriptor set layout bindings).
- *	@param	polygon_mode_index	Index into kTerrainPolygonModes selecting the pipeline's polygon (wireframe) mode.
- *	@param	cull_mode_index		Index into kTerrainCullModes selecting the pipeline's culling mode.
+ *	@param	polygon_mode_index	Index into TERRAIN_POLYGON_MODES selecting the pipeline's polygon (wireframe) mode.
+ *	@param	cull_mode_index		Index into TERRAIN_CULL_MODES selecting the pipeline's culling mode.
  *	@return		A valid VkPipeline handle for the requested (polygon mode, cull mode) combination.
  */
 VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_index, size_t cull_mode_index);

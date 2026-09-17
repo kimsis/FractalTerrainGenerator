@@ -190,13 +190,13 @@ VkDeviceQueueCreateInfo createQueueCreateInfo(VkPhysicalDevice vk_physical_devic
     // Fixed storage duration so the returned struct's pQueuePriorities pointer stays valid for as
     // long as the caller keeps using it (a plain local array here would dangle once this function
     // returns) — safe since the priority value itself never varies.
-    static constexpr std::array<float, 1> kQueuePriorities = {1.0f};
+    static constexpr std::array<float, 1> QUEUE_PRIORITIES = {1.0f};
 
     VkDeviceQueueCreateInfo device_queue_create_info = {};
     device_queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     device_queue_create_info.queueFamilyIndex = selected_queue_family_index;
     device_queue_create_info.queueCount = 1u;
-    device_queue_create_info.pQueuePriorities = kQueuePriorities.data();
+    device_queue_create_info.pQueuePriorities = QUEUE_PRIORITIES.data();
 
     uint32_t queue_family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(vk_physical_device, &queue_family_count, nullptr);
