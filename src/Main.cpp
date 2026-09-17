@@ -304,7 +304,6 @@ VkSurfaceFormatKHR getSurfaceImageFormat(VkPhysicalDevice physical_device, VkSur
  */
 VkSurfaceTransformFlagBitsKHR getSurfaceTransform(VkPhysicalDevice physical_device, VkSurfaceKHR surface);
 
-
 /*!
  *	Allocates a new descriptor set of the given layout from the given descriptor pool.
  *	It is not required to cleanup the returned descriptor set explicitly, it will be cleaned up when the descriptor pool is destroyed.
@@ -737,9 +736,9 @@ int main() {
     /* --------------------------------------------- */
     VkApplicationInfo application_info = {};                     // Zero-initialize every member
     application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO; // Set this struct instance's type
-    application_info.pEngineName = "GCG_VK_Library";             // Set some properties...
+    application_info.pEngineName = "Kimsis_Engine_Terrain_generator";
     application_info.engineVersion = VK_MAKE_API_VERSION(0, 2023, 9, 1);
-    application_info.pApplicationName = "GCG_VK_Solution";
+    application_info.pApplicationName = "Kimsis_Engine_Terrain";
     application_info.applicationVersion = VK_MAKE_API_VERSION(0, 2023, 9, 19);
     application_info.apiVersion = VK_API_VERSION_1_1; // Your system needs to support this Vulkan API version.
 
@@ -1044,7 +1043,13 @@ int main() {
     initial_terrain_params.seed = initial_seed;
     initial_terrain_params.gridSizeExponent = initial_grid_size_exponent;
     TerrainScene terrain_scene = setupTerrainScene(
-        vk_device, vk_queue, selected_queue_family_index, initial_terrain_params, initial_height_scale, initial_roughness, initial_water_level
+        vk_device,
+        vk_queue,
+        selected_queue_family_index,
+        initial_terrain_params,
+        initial_height_scale,
+        initial_roughness,
+        initial_water_level
     );
     generateTerrainGeometryWithLoadingScreen(vk_device, terrain_scene.chunkManager, activeCamera->getPosition());
 
@@ -1207,28 +1212,6 @@ int main() {
         }
         updateLoadedChunks(terrain_scene.chunkManager, activeCamera->getPosition(), currentFrameTime);
         updateWaterChunks(vk_device, water_scene, terrain_scene.chunkManager);
-        {
-            static size_t last_loaded = SIZE_MAX;
-            static size_t last_pending = SIZE_MAX;
-            if (terrain_scene.chunkManager.loadedChunks.size() != last_loaded || terrain_scene.chunkManager.pendingChunks.size() != last_pending) {
-                last_loaded = terrain_scene.chunkManager.loadedChunks.size();
-                last_pending = terrain_scene.chunkManager.pendingChunks.size();
-                ChunkCoord cc = cameraToChunkCoord(activeCamera->getPosition(), terrain_scene.chunkManager.baseParams);
-                glm::vec3 camPos = activeCamera->getPosition();
-                fprintf(
-                    stderr,
-                    "DIAGNOSTIC: pos=(%.1f,%.1f,%.1f) camMode=%s cameraChunk=(%d,%d) loaded=%zu pending=%zu\n",
-                    camPos.x,
-                    camPos.y,
-                    camPos.z,
-                    g_toggle_camera ? "fly" : "trackball",
-                    cc.cx,
-                    cc.cy,
-                    last_loaded,
-                    last_pending
-                );
-            }
-        }
 
         float delta_x = mouse_x - mouse_x_last;
         float delta_y = mouse_y - mouse_y_last;
@@ -1974,9 +1957,7 @@ TerrainScene setupTerrainScene(
         sizeof(DirectionalLight) * num_dirlights,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
     );
-    DirectionalLight directional_light = {
-        glm::vec4(g_dirlight_color, 0.0f), glm::normalize(glm::vec4(g_dirlight_dir, 0.0f))
-    };
+    DirectionalLight directional_light = {glm::vec4(g_dirlight_color, 0.0f), glm::normalize(glm::vec4(g_dirlight_dir, 0.0f))};
     vklCopyDataIntoHostCoherentBuffer(scene.ub_dirlight, &directional_light, sizeof(DirectionalLight));
 
     scene.ub_terrain_vert = vklCreateHostCoherentBufferWithBackingMemory(

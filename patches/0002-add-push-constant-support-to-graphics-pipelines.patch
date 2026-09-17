@@ -8,8 +8,7 @@ diff --git a/VulkanLaunchpad.h b/VulkanLaunchpad.h
 +
 +    /*!
 +     *	Push constant ranges for this pipeline's layout, if any. Leave empty (the default) for a
-+     *	pipeline that doesn't use push constants. Added at the end so existing positional
-+     *	initializers of this struct keep compiling unchanged.
++     *	pipeline that doesn't use push constants.
 +     */
 +    std::vector<VkPushConstantRange> pushConstantRanges = {};
  };

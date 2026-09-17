@@ -7,11 +7,10 @@ index 4fc9d7c..8aff8bd 100644
  constexpr int CONCURRENT_FRAMES = 1;
  std::array<vk::UniqueSemaphore, CONCURRENT_FRAMES> mImageAvailableSemaphores;
 -std::array<vk::UniqueSemaphore, CONCURRENT_FRAMES> mRenderFinishedSemaphores;
-+// One per swapchain image (not per frame-in-flight!): a renderFinishedSemaphore is waited on
++// One per swapchain image (not per frame-in-flight): a renderFinishedSemaphore is waited on
 +// by vkQueuePresentKHR, whose consumption is tracked by the presentation engine, not by
-+// mSyncHostWithDeviceFence. Indexing it by frame-in-flight instead of swapchain image allowed
-+// the same semaphore to be re-signaled while still in use by an outstanding present operation
-+// (VUID-vkQueueSubmit-pSignalSemaphores-00067).
++// mSyncHostWithDeviceFence. Indexing it by frame-in-flight instead of swapchain image allows
++// the same semaphore to be re-signaled while still in use by an outstanding present operation.
 +std::vector<vk::UniqueSemaphore> mRenderFinishedSemaphores;
  std::array<vk::UniqueFence, CONCURRENT_FRAMES> mSyncHostWithDeviceFence;
  std::vector<int> mImagesInFlightFenceIndices;
