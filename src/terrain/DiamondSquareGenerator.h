@@ -10,7 +10,7 @@ struct TerrainParams {
     float hurst = 0.8f;
     uint32_t seed = 1337u;
     float initialVariance = 25.0f;
-    // only needed for non-square maps, kept just in case
+    // only needed for non-square maps
     int spacing = 10;
     int chunkX = 0;
     int chunkY = 0;
@@ -43,8 +43,7 @@ class DiamondSquareGenerator {
     void GenerateHeightMap();
     void GeneratePositions();
 
-    // Computes heights + positions + indices only — no normals. This is the part that's fully
-    // independent between chunks (see deriveTerrainNormals for why normals aren't).
+    // Computes heights + positions + indices only — no normals.
     void ComputeTerrain();
 
     ~DiamondSquareGenerator();

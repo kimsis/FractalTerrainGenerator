@@ -9,10 +9,7 @@
 
 /*!
  *	One loaded chunk's water quad: positions are baked directly in world space (that chunk's XY
- *	offset already added in), exactly like terrain's own per-chunk Geometry — so, also like terrain,
- *	no per-chunk uniform data is needed at all; a single shared UBO/descriptor set (see WaterScene in
- *	Main.cpp) covers every chunk, since the only thing it holds (view-proj + the water level's Z) is
- *	identical across all of them in a given frame.
+ *	offset already added in), like terrain's own per-chunk Geometry.
  */
 struct WaterChunkGeometry {
     VkBuffer positionsBuffer;
@@ -22,8 +19,7 @@ struct WaterChunkGeometry {
 
 /*!
  *	Builds one chunk's water quad with world-space XY already baked in (local z=0 — a shared
- *	per-frame model matrix handles the water-level Z), exactly mirroring how terrain chunks bake
- *	their own world position into their vertices.
+ *	per-frame model matrix handles the water-level Z).
  */
 WaterChunkGeometry buildWaterChunkGeometry(const ChunkCoord& coord, const TerrainParams& baseParams);
 

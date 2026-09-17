@@ -13,20 +13,14 @@
 #include "DiamondSquareGenerator.h"
 
 // Positions and normals share one buffer (see Geometry::vertexBuffer); normals start at this
-// byte-aligned offset past the positions region. 16 bytes comfortably covers any reasonable
-// vertex-attribute format without relying on a driver-specific minimum vertex-buffer-offset
-// alignment (the core Vulkan spec places no explicit alignment requirement on vkCmdBindVertexBuffers
-// offsets, unlike e.g. uniform/storage buffers).
+// byte-aligned offset past the positions region.
 static constexpr VkDeviceSize kVertexSubBufferAlignment = 16;
 
 static VkDeviceSize alignUp(VkDeviceSize value, VkDeviceSize alignment) { return (value + alignment - 1) / alignment * alignment; }
 
-// Phase 1 of terrain generation: heights + positions + indices only, no normals. This is the part
-// that's fully independent between chunks — a pure function of (seed, global coords, level) — so
-// it can run on a background thread with zero cross-chunk communication. Normals are derived in a
-// separate, dependency-aware phase 2 once neighboring chunks' phase 1 data is available (see
-// deriveTerrainNormals() and ChunkManager's updateLoadedChunks()), instead of regenerating full
-// throwaway neighbor grids just to read a boundary row/column from them.
+// Phase 1 of terrain generation: heights + positions + indices only, no normals. Normals are
+// derived in a separate phase 2 (see deriveTerrainNormals) once neighboring chunks' phase-1 data
+// is available.
 GeometryData generateTerrainGeometry(const TerrainParams& params) {
     GeometryData data;
     DiamondSquareGenerator generator(params);
@@ -69,7 +63,7 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data) {
 
 void destroyGeometryGpuMemory(const Geometry& geometry) {
     // vklDestroyHostCoherentBufferAndItsBackingMemory errors out on a null handle, so a legitimately
-    // null vertexBuffer (see ChunkManager::LoadedChunk::idleVertexBuffer) must be skipped explicitly.
+    // null vertexBuffer must be skipped explicitly.
     if (geometry.vertexBuffer != VK_NULL_HANDLE) {
         vklDestroyHostCoherentBufferAndItsBackingMemory(geometry.vertexBuffer);
     }

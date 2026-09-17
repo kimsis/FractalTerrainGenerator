@@ -7,7 +7,9 @@
 #include <optional>
 #include <utility>
 
-std::future<GeometryData> startTerrainGeneration(const TerrainParams& params);
+std::future<GeometryData> startTerrainGeneration(const TerrainParams& params) {
+    return std::async(std::launch::async, generateTerrainGeometry, params);
+}
 
 VkBuffer createAndUploadIndexBuffer(const std::vector<uint32_t>& indices) {
     if (indices.empty()) {
@@ -39,8 +41,8 @@ static std::vector<float> sampleRow(const GeometryData& data, int size, int loca
     return row;
 }
 
-// True if `geometry`'s buffers are real, not the all-VK_NULL_HANDLE state a LoadedChunk's `from`
-// sits in whenever that chunk isn't currently blending.
+// True if `geometry`'s buffers are real (not the all-VK_NULL_HANDLE state `from` sits in while not
+// blending).
 static bool isValidGeometry(const Geometry& geometry) { return geometry.vertexBuffer != VK_NULL_HANDLE; }
 
 // The chunk's persistent vertex buffer that isn't currently `to` — its ping-pong partner. While
@@ -91,9 +93,7 @@ static std::future<std::vector<glm::vec3>> dispatchNormalDerivation(const ChunkM
     });
 }
 
-// How many updateLoadedChunks calls a PendingDestroy waits before it's actually freed. One call
-// would already be provably safe (see PendingDestroy's doc), but two gives a small margin in case
-// VulkanLaunchpad.cpp's CONCURRENT_FRAMES ever changes from its current value of 1.
+// How many updateLoadedChunks calls a PendingDestroy waits before it's actually freed.
 static constexpr int kDestroyDeferralCalls = 2;
 
 void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, double currentTime) {
@@ -227,10 +227,6 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
 
     // 6. Drain re-derived normals from step 5 and patch `to`'s normals buffer in place. Discarded
     // silently if the chunk was invalidated/evicted while in flight.
-    //
-    // Unlike pendingDestroys, this write isn't deferred against a possibly still-in-flight command
-    // buffer: worst case is a handful of vertices along one edge briefly showing a torn mix of
-    // old/new normals for one frame, not a use-after-free.
     for (auto it = manager.pendingRenormals.begin(); it != manager.pendingRenormals.end();) {
         if (it->second.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
             ++it;
@@ -246,15 +242,13 @@ void updateLoadedChunks(ChunkManager& manager, const glm::vec3& cameraPos, doubl
     }
 
     // 7-8. Evict chunks past (viewRadius + 1), queuing their Geometry in pendingDestroys rather than
-    // destroying outright (see PendingDestroy) — the real GPU cost is paid gradually below. A
-    // finished blend, unlike eviction, destroys nothing: `from`'s buffer is the chunk's ping-pong
-    // spare, reused in place by the next regeneration instead of freed and reallocated.
+    // destroying outright. A finished blend destroys nothing: `from`'s buffer is the chunk's
+    // ping-pong spare, reused by the next regeneration.
     for (auto it = manager.loadedChunks.begin(); it != manager.loadedChunks.end();) {
         LoadedChunk& chunk = it->second;
         if (!isWithinViewRadius(it->first, center, destroyRadius)) {
             // `to`'s vertex buffer and the chunk's other persistent buffer (if any) are freed here;
             // the index buffer is shared across all chunks, freed only once, at cleanupChunkManager.
-            // Geometry{buffer, 0} just wraps a bare VkBuffer for destroyGeometryGpuMemory.
             VkBuffer other = otherVertexBuffer(chunk);
             if (other != VK_NULL_HANDLE) manager.pendingDestroys.push_back({Geometry{other, 0}, kDestroyDeferralCalls});
             manager.pendingDestroys.push_back({chunk.to, kDestroyDeferralCalls});

@@ -20,8 +20,7 @@ layout (binding = 1) uniform UniformBufferFrag {
 
 const float BORDER_HIGHLIGHT_HALF_WIDTH = 0.5; // 1 world unit wide, independent of vertex spacing
 
-// Slopes steeper than this show bare rock regardless of height, blended over a +/-5 degree band to
-// avoid a hard, aliased edge where the terrain crosses the threshold.
+// Slopes steeper than this show bare rock regardless of height, blended over a +/-5 degree band.
 const float SLOPE_ROCK_ANGLE_DEG = 45.0;
 const float SLOPE_ROCK_TRANSITION_DEG = 5.0;
 

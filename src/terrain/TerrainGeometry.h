@@ -31,15 +31,13 @@ struct GeometryData {
 };
 
 /*!
- *	A struct that contains the GPU-side vertex data buffer for one from/to blend snapshot.
- *	Deliberately does NOT include an index buffer: a chunk's topology is invariant across every
- *	Hurst/reseed regeneration, so it's owned once at the chunk level instead (see
- *	ChunkManager::LoadedChunk) rather than duplicated into every from/to Geometry.
+ *	A struct that contains the GPU-side vertex data buffer for one from/to blend snapshot. Does not
+ *	include an index buffer — that's owned once at the chunk level (see ChunkManager::LoadedChunk).
  */
 struct Geometry {
     // A handle to a single GPU buffer holding both vertex positions (at byte offset 0) and vertex
-    // normals (at byte offset normalsOffset) — one combined allocation instead of two separate
-    // ones. Bound twice in the draw call (once per offset) as separate vertex-input bindings.
+    // normals (at byte offset normalsOffset). Bound twice in the draw call (once per offset) as
+    // separate vertex-input bindings.
     VkBuffer vertexBuffer;
 
     // Byte offset into vertexBuffer where normal data begins.
@@ -70,8 +68,7 @@ Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data);
 /*!
  *	Overwrites an already-allocated vertexBuffer's positions+normals regions in place (same layout
  *	as createAndUploadIntoGpuMemory) — no GPU allocation happens here. `vertexBuffer` must already
- *	be big enough to hold `geometry_data`'s positions+normals, which holds whenever it was
- *	originally sized for the same grid dimensions (see ChunkManager::LoadedChunk::idleVertexBuffer).
+ *	be big enough to hold `geometry_data`'s positions+normals.
  *
  *	@param	vertexBuffer	An existing buffer, at least as large as this call will write into it.
  *	@param	geometry_data	The CPU-side geometry to overwrite it with.
@@ -81,15 +78,12 @@ VkDeviceSize uploadVertexDataInPlace(VkBuffer vertexBuffer, const GeometryData& 
 
 /*!
  *	Frees `geometry`'s vertex buffer, if it's non-null. A VK_NULL_HANDLE `vertexBuffer` is
- *	explicitly safe (a no-op) — see ChunkManager::LoadedChunk::idleVertexBuffer. Only destroys the
- *	vertex buffer — a chunk's index buffer (see ChunkManager::createAndUploadIndexBuffer) is freed
+ *	explicitly safe (a no-op). Only destroys the vertex buffer — a chunk's index buffer is freed
  *	separately, also via this function, wrapped in a throwaway Geometry.
  */
 void destroyGeometryGpuMemory(const Geometry& geometry);
 
 /*!
  *	Overwrites an already-uploaded Geometry's normals region in place, leaving positions untouched.
- *	Used to patch previously-extrapolated edge normals once a neighboring chunk's real data becomes
- *	available (see ChunkManager).
  */
 void updateGeometryNormals(const Geometry& geometry, const std::vector<glm::vec3>& normals);

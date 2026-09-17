@@ -76,9 +76,7 @@ struct UniformBufferVert {
 
 /*!
  *	Per-chunk blend state for terrain.vert, pushed via vkCmdPushConstants immediately before each
- *	chunk's draw call — a uniform buffer can't hold a different value per draw call within one
- *	frame, since all of a frame's host writes to it land before the GPU executes any of that
- *	frame's draws.
+ *	chunk's draw call.
  */
 struct TerrainPushConstants {
     /*! 0-1 blend progress between this chunk's `from` and `to` geometry. */
@@ -205,10 +203,7 @@ struct WaterScene {
 };
 
 /*!
- *	Everything loadSettings() reads out of settings.ini that main() still needs afterward — plain
- *	one-time startup values, as opposed to the many settings.ini-backed globals (g_camera_speed,
- *	g_terrain_ka, ...) that loadSettings() writes directly since nothing outside their own subsystem
- *	ever needs them passed around.
+ *	Everything loadSettings() reads out of settings.ini that main() still needs afterward.
  */
 struct AppSettings {
     int window_width;
@@ -237,9 +232,7 @@ struct AppSettings {
 
 /*!
  *	Everything recreateSwapchainAndDependents needs that stays fixed for the whole render loop —
- *	built once before the loop starts. Kept separate from the Vulkan/camera objects it actually
- *	replaces (vk_swapchain, depth_buffer, ...), which are passed as mutable references instead since
- *	each call updates them in place.
+ *	built once before the loop starts.
  */
 struct SwapchainRecreateContext {
     GLFWwindow* window;
@@ -257,9 +250,7 @@ struct SwapchainRecreateContext {
 
 /*!
  *	Everything createSwapchain produces that main() still needs afterward, beyond the swapchain
- *	handle itself: the surface format/capabilities (needed again for ImGui init and
- *	SwapchainRecreateContext) and the image usage flags actually used (needed to build the
- *	framebuffer composition — see buildSwapchainConfig).
+ *	handle itself.
  */
 struct SwapchainSetup {
     VkSwapchainKHR swapchain;
@@ -285,10 +276,11 @@ AppSettings loadSettings();
 void errorCallbackFromGlfw(int error, const char* description);
 
 /*!
- *	Function that is invoked by GLFW to handle key events like key presses or key releases.
- *	If the ESC key has been pressed, the window will be marked that it should close.
+ *	Add extension_name to the target vector ref_vector if the extension is supported on this system.
+ *	@param	extension_name		The instance extension that shall be added to ref_vector
+ *	@param	ref_vector			Reference to the vector that the instance extension shall be added to, if supported
  */
-void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int action, int mods);
+void addInstanceExtensionToVectorIfSupported(const char* extension_name, std::vector<const char*>& ref_vector);
 
 /*!
  *	Determine the Vulkan instance extensions that are required by GLFW and Vulkan Launchpad.
@@ -304,20 +296,6 @@ void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int a
 std::vector<const char*> getRequiredInstanceExtensions();
 
 /*!
- *	Based on the given physical device and the surface, select a queue family which supports both,
- *	graphics and presentation to the given surface. Return the INDEX of an appropriate queue family!
- *	@return		The index of a queue family which supports the required features shall be returned.
- */
-uint32_t selectQueueFamilyIndex(VkPhysicalDevice physical_device, VkSurfaceKHR surface);
-
-/*!
- *	Add extension_name to the target vector ref_vector if the extension is supported on this system.
- *	@param	extension_name		The instance extension that shall be added to ref_vector
- *	@param	ref_vector			Reference to the vector that the instance extension shall be added to, if supported
- */
-void addInstanceExtensionToVectorIfSupported(const char* extension_name, std::vector<const char*>& ref_vector);
-
-/*!
  *	Add validation_layer_name to the target vector ref_vector if the validation layer is supported on this system:
  *	@param	validation_layer_name	The validation layer name that shall be added to ref_vector
  *	@param	ref_vector				Reference to the vector that the validation layer name shall be added to, if
@@ -326,12 +304,15 @@ void addInstanceExtensionToVectorIfSupported(const char* extension_name, std::ve
 void addValidationLayerNameToVectorIfSupported(const char* validation_layer_name, std::vector<const char*>& ref_vector);
 
 /*!
- *	Add extension_name to the target vector ref_vector if the extension is supported by the given physical device.
- *	@param	extension_name		The device extension that shall be added to ref_vector
- *	@param	physical_device		The physical device handle which must support the given extension
- *	@param	ref_vector			Reference to the vector that the device extension shall be added to, if supported
+ *	Creates the VkInstance: application info, required extensions (getRequiredInstanceExtensions),
+ *	and the validation layer if supported.
  */
-void addDeviceExtensionToVectorIfSupported(const char* extension_name, VkPhysicalDevice physical_device, std::vector<const char*>& ref_vector);
+VkInstance createVulkanInstance();
+
+/*!
+ *	Creates the VkSurfaceKHR for the given window.
+ */
+VkSurfaceKHR createWindowSurface(VkInstance vk_instance, GLFWwindow* window);
 
 /*!
  *	From the given list of physical devices, select the first one that satisfies all requirements.
@@ -357,46 +338,30 @@ uint32_t selectPhysicalDeviceIndex(const VkPhysicalDevice* physical_devices, uin
 uint32_t selectPhysicalDeviceIndex(const std::vector<VkPhysicalDevice>& physical_devices, VkSurfaceKHR surface);
 
 /*!
- *	Based on the given physical device and the surface, a the physical device's surface capabilites are read and returned.
- *	@return		VkSurfaceCapabilitiesKHR data
- */
-VkSurfaceCapabilitiesKHR getPhysicalDeviceSurfaceCapabilities(VkPhysicalDevice physical_device, VkSurfaceKHR surface);
-
-/*!
- *	Based on the given physical device and the surface, a supported surface image format
- *	which can be used for the framebuffer's attachment formats is searched and returned.
- *	@return		A supported format is returned.
- */
-VkSurfaceFormatKHR getSurfaceImageFormat(VkPhysicalDevice physical_device, VkSurfaceKHR surface);
-
-/*!
- *	Based on the given physical device and the surface, return its surface transform flag.
- *	This can be used to set the swap chain to the same configuration as the surface's current transform.
- *	@return		The surface capabilities' currentTransform value is returned, which is suitable for swap chain config.
- */
-VkSurfaceTransformFlagBitsKHR getSurfaceTransform(VkPhysicalDevice physical_device, VkSurfaceKHR surface);
-
-/*!
- *	Creates the VkInstance: application info, required extensions (getRequiredInstanceExtensions),
- *	and the validation layer if supported.
- */
-VkInstance createVulkanInstance();
-
-/*!
- *	Creates the VkSurfaceKHR for the given window.
- */
-VkSurfaceKHR createWindowSurface(VkInstance vk_instance, GLFWwindow* window);
-
-/*!
  *	Enumerates the system's physical devices and selects one via selectPhysicalDeviceIndex.
  */
 VkPhysicalDevice pickPhysicalDevice(VkInstance vk_instance, VkSurfaceKHR vk_surface);
+
+/*!
+ *	Based on the given physical device and the surface, select a queue family which supports both,
+ *	graphics and presentation to the given surface. Return the INDEX of an appropriate queue family!
+ *	@return		The index of a queue family which supports the required features shall be returned.
+ */
+uint32_t selectQueueFamilyIndex(VkPhysicalDevice physical_device, VkSurfaceKHR surface);
 
 /*!
  *	Builds the VkDeviceQueueCreateInfo for the given (already-selected, see selectQueueFamilyIndex)
  *	queue family, after sanity-checking that index against vkGetPhysicalDeviceQueueFamilyProperties.
  */
 VkDeviceQueueCreateInfo createQueueCreateInfo(VkPhysicalDevice vk_physical_device, uint32_t selected_queue_family_index);
+
+/*!
+ *	Add extension_name to the target vector ref_vector if the extension is supported by the given physical device.
+ *	@param	extension_name		The device extension that shall be added to ref_vector
+ *	@param	physical_device		The physical device handle which must support the given extension
+ *	@param	ref_vector			Reference to the vector that the device extension shall be added to, if supported
+ */
+void addDeviceExtensionToVectorIfSupported(const char* extension_name, VkPhysicalDevice physical_device, std::vector<const char*>& ref_vector);
 
 /*!
  *	Creates the logical device (with the extensions/features this app needs, including detecting
@@ -410,6 +375,19 @@ VkDevice createLogicalDeviceAndQueue(
 );
 
 /*!
+ *	Based on the given physical device and the surface, a supported surface image format
+ *	which can be used for the framebuffer's attachment formats is searched and returned.
+ *	@return		A supported format is returned.
+ */
+VkSurfaceFormatKHR getSurfaceImageFormat(VkPhysicalDevice physical_device, VkSurfaceKHR surface);
+
+/*!
+ *	Based on the given physical device and the surface, a the physical device's surface capabilites are read and returned.
+ *	@return		VkSurfaceCapabilitiesKHR data
+ */
+VkSurfaceCapabilitiesKHR getPhysicalDeviceSurfaceCapabilities(VkPhysicalDevice physical_device, VkSurfaceKHR surface);
+
+/*!
  *	Creates the swapchain sized to the surface's actual capabilities (clamping/overwriting
  *	window_width/window_height to match), and retrieves its images.
  */
@@ -421,6 +399,8 @@ SwapchainSetup createSwapchain(
     int& window_width,
     int& window_height
 );
+
+std::optional<Hit> raycastTerrain(const glm::vec3& origin, const glm::vec3& direction);
 
 /*!
  *	Creates the depth buffer image used by every pipeline with depth test/write enabled.
@@ -460,6 +440,12 @@ void initImGui(
 );
 
 /*!
+ *	Builds (compiles + creates) the terrain pipeline for one (polygon mode, cull mode) combination,
+ *	identified by their indices into kTerrainPolygonModes/kTerrainCullModes.
+ */
+VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_index, size_t cull_mode_index);
+
+/*!
  *	Allocates a new descriptor set of the given layout from the given descriptor pool.
  *	It is not required to cleanup the returned descriptor set explicitly, it will be cleaned up when the descriptor pool is destroyed.
  *	@param	device					Valid handle to the logical device
@@ -492,6 +478,40 @@ void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffe
 void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer vert_buffer, VkBuffer frag_buffer, VkBuffer directional_light_data);
 
 /*!
+ *	Creates the shared pipeline, uniform buffers, and descriptor set that every loaded chunk is
+ *	drawn with, and configures the scene's ChunkManager from params. Chunk geometry itself is
+ *	generated/uploaded on demand, driven by the camera — not by this one-time setup call.
+ */
+TerrainScene setupTerrainScene(
+    VkDevice vk_device,
+    VkQueue vk_queue,
+    uint32_t selected_queue_family_index,
+    TerrainParams& params,
+    float initial_height_scale,
+    float initial_roughness,
+    float initial_water_level
+);
+
+/*!
+ *	Builds a minimal ImGui panel shown while the initial chunks are generating, before the real
+ *	terrain scene's own controls exist yet.
+ */
+void buildLoadingGUI(size_t pendingChunkCount);
+
+/*!
+ *	Blocks until every chunk in the initial (2 * viewRadius + 1)^2 window around cameraPos has been
+ *	generated and uploaded, while keeping the window responsive (polling events and drawing a
+ *	loading screen) for however long that takes. Use this once, at startup, before the main render
+ *	loop begins — per-frame streaming (updateLoadedChunks) takes over from there.
+ */
+void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& chunkManager, const glm::vec3& cameraPos);
+
+/*!
+ *	Builds the water plane's shared pipeline, uniform buffer, and descriptor set.
+ */
+WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_params);
+
+/*!
  *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
  *	mouse button input that can be processed by our application.
  */
@@ -510,6 +530,12 @@ void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoff
  *	render loop, where the Vulkan objects it needs are in scope.
  */
 void framebufferSizeCallbackFromGlfw(GLFWwindow* glfw_window, int width, int height);
+
+/*!
+ *	Function that is invoked by GLFW to handle key events like key presses or key releases.
+ *	If the ESC key has been pressed, the window will be marked that it should close.
+ */
+void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int action, int mods);
 
 /*!
  *	Recreates the swapchain, depth buffer, and every pipeline against the window's current
@@ -546,12 +572,27 @@ void handleCameraToggleRequest(
 );
 
 /*!
+ *	Draws a fresh uint32_t seed from a properly-seeded std::mt19937, spanning the full uint32_t range.
+ */
+uint32_t generateRandomSeed();
+float generateRandomHurst();
+float generateRandomHeightScale();
+float generateRandomWaterLevel();
+
+/*!
  *	Applies any pending reseed/Hurst-change/demo-mode change to the terrain scene for this frame:
  *	starts a regeneration when needed (guarded by isRegenerating(), same as the GUI's own guard),
  *	advances demo mode's height-scale/water-level drift, and applies a pending view-radius change.
  *	Does not itself stream chunks in/out — see updateLoadedChunks() for that.
  */
 void updateTerrainState(TerrainScene& terrain_scene, double currentFrameTime);
+
+/*!
+ *	Creates a small world-space-baked water quad for any newly-loaded terrain chunk, and destroys
+ *	it for any chunk that's since been unloaded. Call once per frame, right after
+ *	updateLoadedChunks(), outside vklStartRecordingCommands()/vklEndRecordingCommands().
+ */
+void updateWaterChunks(VkDevice vk_device, WaterScene& scene, const ChunkManager& chunkManager);
 
 /*!
  *	Applies this frame's mouse-look, shift-to-run, trackball strafe/zoom, and fly-mode WASD input to
@@ -569,6 +610,22 @@ void applyCameraInput(
     double& mouse_y_last,
     float dt
 );
+
+/*!
+ *	Prints `label`, then positions the cursor so the widget that follows always ends flush with the
+ *	right edge, `widget_width` wide, regardless of the label's own width — instead of its position (or,
+ *	for non-input widgets like Button that ignore SetNextItemWidth, its right edge) drifting depending
+ *	on how long each row's label happens to be. Pass kSliderWidth for sliders/inputs; for a Button, pass
+ *	its own natural size (ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f) so the
+ *	button's actual right edge — not just where a kSliderWidth-wide widget would have started — lands at
+ *	the true right edge.
+ */
+void labelThenRightAlignedWidget(const char* label, float widget_width);
+
+/*!
+ * Builds the ImGUI Sidebar
+ */
+void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::vec3& cameraForward);
 
 /*!
  *	Bind the given descriptor set to use the material it represents for subsequent draw calls
@@ -592,77 +649,6 @@ void drawGeometryWithMaterial(
 );
 
 /*!
- *	Builds (compiles + creates) the terrain pipeline for one (polygon mode, cull mode) combination,
- *	identified by their indices into kTerrainPolygonModes/kTerrainCullModes. Shader compilation isn't
- *	cached by the framework, so this is deliberately only called once per combination, on demand.
- */
-VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_index, size_t cull_mode_index);
-
-/*!
- *	Creates the shared pipeline, uniform buffers, and descriptor set that every loaded chunk is
- *	drawn with, and configures the scene's ChunkManager from params. Chunk geometry itself is
- *	generated/uploaded on demand, driven by the camera — not by this one-time setup call.
- */
-TerrainScene setupTerrainScene(
-    VkDevice vk_device,
-    VkQueue vk_queue,
-    uint32_t selected_queue_family_index,
-    TerrainParams& params,
-    float initial_height_scale,
-    float initial_roughness,
-    float initial_water_level
-);
-
-/*!
- *	Kicks off terrain generation for the given params on a background thread and returns immediately
- *	with a future for the result — does not block, does not show any loading UI. Use this for silent
- *	background regeneration (e.g. after a Hurst change), where the currently-displayed terrain should
- *	keep rendering normally until the new one is ready to swap in.
- */
-std::future<GeometryData> startTerrainGeneration(const TerrainParams& params);
-
-/*!
- *	Builds a minimal ImGui panel shown while the initial chunks are generating, before the real
- *	terrain scene's own controls exist yet.
- */
-void buildLoadingGUI(size_t pendingChunkCount);
-
-/*!
- *	Blocks until every chunk in the initial (2 * viewRadius + 1)^2 window around cameraPos has been
- *	generated and uploaded, while keeping the window responsive (polling events and drawing a
- *	loading screen) for however long that takes. Use this once, at startup, before the main render
- *	loop begins — per-frame streaming (updateLoadedChunks) takes over from there.
- */
-void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& chunkManager, const glm::vec3& cameraPos);
-
-/*!
- *	Prints `label`, then positions the cursor so the widget that follows always ends flush with the
- *	right edge, `widget_width` wide, regardless of the label's own width — instead of its position (or,
- *	for non-input widgets like Button that ignore SetNextItemWidth, its right edge) drifting depending
- *	on how long each row's label happens to be. Pass kSliderWidth for sliders/inputs; for a Button, pass
- *	its own natural size (ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f) so the
- *	button's actual right edge — not just where a kSliderWidth-wide widget would have started — lands at
- *	the true right edge.
- */
-void labelThenRightAlignedWidget(const char* label, float widget_width);
-
-/*!
- *	Draws a fresh uint32_t seed from a properly-seeded std::mt19937, spanning the full uint32_t range.
- *	Not rand(): rand()'s range is only guaranteed to be at least [0, 32767], it's implicitly-seeded
- *	global state (producing the same sequence every run unless srand() is called), and has well-known
- *	statistical weaknesses in its low-order bits.
- */
-uint32_t generateRandomSeed();
-float generateRandomHurst();
-float generateRandomHeightScale();
-float generateRandomWaterLevel();
-
-/*!
- * Builds the ImGUI Sidebar
- */
-void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::vec3& cameraForward);
-
-/*!
  *	Updates the terrain scene's uniform buffers based on the current camera, and records draw calls
  *	for it into the currently recording command buffer. Must be called between
  *	vklStartRecordingCommands() and vklEndRecordingCommands().
@@ -670,29 +656,16 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
 void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera* camera, double currentTime);
 
 /*!
- *	Destroys all GPU resources owned by the given terrain scene.
- */
-void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene);
-std::optional<Hit> raycastTerrain(const glm::vec3& origin, const glm::vec3& direction);
-
-/*!
- *	Builds the water plane's shared pipeline, uniform buffer, and descriptor set.
- */
-WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_params);
-
-/*!
- *	Creates a small world-space-baked water quad for any newly-loaded terrain chunk, and destroys
- *	it for any chunk that's since been unloaded. Call once per frame, right after
- *	updateLoadedChunks(), outside vklStartRecordingCommands()/vklEndRecordingCommands().
- */
-void updateWaterChunks(VkDevice vk_device, WaterScene& scene, const ChunkManager& chunkManager);
-
-/*!
  *	Updates the water plane's shared uniform buffer and records one draw call per loaded chunk's
  *	water geometry. Must be called between vklStartRecordingCommands() and vklEndRecordingCommands(),
  *	after the terrain has been drawn.
  */
 void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scene, const Camera* camera);
+
+/*!
+ *	Destroys all GPU resources owned by the given terrain scene.
+ */
+void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene);
 
 /*!
  *	Destroys all GPU resources owned by the given water scene.
@@ -792,86 +765,6 @@ static bool g_synchronization2_supported = false;
  */
 PFN_vkCmdPipelineBarrier2KHR g_vkCmdPipelineBarrier2KHR;
 
-AppSettings loadSettings() {
-    // Every startup default lives in one file now — one-time settings (window/camera/renderer)
-    // and GUI sliders' starting values (terrain/chunks) alike.
-    INIReader settings_reader("assets/settings/settings.ini");
-
-    AppSettings settings{};
-    settings.window_width = 800;
-    settings.window_height = 800;
-    settings.window_title = settings_reader.Get("window", "title", WINDOW_TITLE);
-
-    settings.field_of_view = static_cast<float>(settings_reader.GetReal("camera", "fov", 60.0f));
-    settings.near_plane_distance = static_cast<float>(settings_reader.GetReal("camera", "near", 0.1f));
-    settings.far_plane_distance = static_cast<float>(settings_reader.GetReal("camera", "far", 100.0f));
-    settings.camera_position = glm::vec3(
-        static_cast<float>(settings_reader.GetReal("camera", "position_x", 0.0f)),
-        static_cast<float>(settings_reader.GetReal("camera", "position_y", 0.0f)),
-        static_cast<float>(settings_reader.GetReal("camera", "position_z", 0.0f))
-    );
-    // Same convention as the live fly-camera controls: yaw/pitch = 0 looks along +X; positive
-    // pitch looks up, negative looks down.
-    settings.camera_yaw = static_cast<float>(settings_reader.GetReal("camera", "yaw", 0.0f));
-    settings.camera_pitch = static_cast<float>(settings_reader.GetReal("camera", "pitch", 0.0f));
-
-    bool as_wireframe = settings_reader.GetBoolean("renderer", "wireframe", false);
-    if (as_wireframe) {
-        g_polygon_mode_index = 1;
-    }
-    bool with_backface_culling = settings_reader.GetBoolean("renderer", "backface_culling", false);
-    if (with_backface_culling) {
-        g_culling_index = 1;
-    }
-    g_draw_normals = settings_reader.GetBoolean("renderer", "normals", false);
-    settings.depthtest = settings_reader.GetBoolean("renderer", "depthtest", true);
-    settings.background_r = static_cast<float>(settings_reader.GetReal("renderer", "background_r", 0.14));
-    settings.background_g = static_cast<float>(settings_reader.GetReal("renderer", "background_g", 0.4));
-    settings.background_b = static_cast<float>(settings_reader.GetReal("renderer", "background_b", 0.37));
-
-    // Initial values for the "Terrain Controls" GUI sliders — every one of them stays live-
-    // adjustable from the GUI afterward, this only affects what they start at.
-    settings.initial_hurst = static_cast<float>(settings_reader.GetReal("terrain", "hurst", 0.8));
-    settings.initial_seed = static_cast<uint32_t>(settings_reader.GetInteger("terrain", "seed", 1337));
-    settings.initial_grid_size_exponent = static_cast<int>(settings_reader.GetInteger("terrain", "grid_size_exponent", 4));
-    settings.initial_height_scale = static_cast<float>(settings_reader.GetReal("terrain", "height_scale", 1.0));
-    settings.initial_roughness = static_cast<float>(settings_reader.GetReal("terrain", "roughness", 0.6));
-    settings.initial_water_level = static_cast<float>(settings_reader.GetReal("terrain", "water_level", 2.0));
-    g_camera_speed = static_cast<float>(settings_reader.GetReal("camera", "speed", 5.0));
-    g_chunk_view_radius = static_cast<int>(settings_reader.GetInteger("chunks", "view_radius", 16));
-    g_mouse_sensitivity = static_cast<float>(settings_reader.GetReal("camera", "mouse_sensitivity", 0.005));
-    g_scroll_sensitivity = static_cast<float>(settings_reader.GetReal("camera", "scroll_sensitivity", 0.5));
-
-    g_dirlight_color = glm::vec3(
-        static_cast<float>(settings_reader.GetReal("light", "color_r", 0.85)),
-        static_cast<float>(settings_reader.GetReal("light", "color_g", 0.85)),
-        static_cast<float>(settings_reader.GetReal("light", "color_b", 0.85))
-    );
-    g_dirlight_dir = glm::vec3(
-        static_cast<float>(settings_reader.GetReal("light", "dir_x", 0.0)),
-        static_cast<float>(settings_reader.GetReal("light", "dir_y", 1.0)),
-        static_cast<float>(settings_reader.GetReal("light", "dir_z", -1.0))
-    );
-
-    g_terrain_ka = static_cast<float>(settings_reader.GetReal("terrain", "ka", 0.1));
-    g_terrain_kd = static_cast<float>(settings_reader.GetReal("terrain", "kd", 0.9));
-    g_terrain_ks = static_cast<float>(settings_reader.GetReal("terrain", "ks", 0.3));
-    g_terrain_alpha = static_cast<float>(settings_reader.GetReal("terrain", "alpha", 10.0));
-    g_dirt_to_grass_height_offset = static_cast<float>(settings_reader.GetReal("terrain", "dirt_to_grass_height_offset", 3.0));
-    g_grass_to_rock_height_offset = static_cast<float>(settings_reader.GetReal("terrain", "grass_to_rock_height_offset", 10.0));
-    g_height_color_transition_band = static_cast<float>(settings_reader.GetReal("terrain", "height_color_transition_band", 2.0));
-    g_water_depth_bias = static_cast<float>(settings_reader.GetReal("terrain", "water_depth_bias", 0.05));
-    g_blend_duration = settings_reader.GetReal("terrain", "blend_duration", 2.0);
-
-    g_max_destroys_per_frame = static_cast<int>(settings_reader.GetInteger("chunks", "max_destroys_per_frame", 16));
-    g_max_uploads_per_frame = static_cast<int>(settings_reader.GetInteger("chunks", "max_uploads_per_frame", 8));
-
-    g_demo_height_interp_duration = settings_reader.GetReal("demo", "height_interp_duration", 1.0);
-    g_demo_water_interp_duration = settings_reader.GetReal("demo", "water_interp_duration", 1.0);
-
-    return settings;
-}
-
 /* ------------------------------------------------ */
 // Main
 /* ------------------------------------------------ */
@@ -937,9 +830,9 @@ int main() {
     float aspect_ratio = static_cast<float>(window_width) / static_cast<float>(window_height);
     VKL_LOG("Swapchain created with " << swapchain_image_handles.size() << " images.");
 
-    // Create a camera helper object, positioned/oriented per camera_terrain.ini. The trackball
-    // camera's target is derived by raycasting the configured position/direction against the
-    // terrain, falling back to the origin if that ray doesn't hit the terrain (e.g. looking up).
+    // Create a camera helper object, positioned/oriented per settings.ini. The trackball camera's
+    // target is derived by raycasting the configured position/direction against the terrain,
+    // falling back to the origin if that ray doesn't hit the terrain (e.g. looking up).
     FlyCamera flyCamera(settings.field_of_view, aspect_ratio, settings.near_plane_distance, settings.far_plane_distance);
     flyCamera.translate(settings.camera_position);
     flyCamera.rotate(glm::radians(settings.camera_yaw), glm::radians(settings.camera_pitch));
@@ -1161,7 +1054,158 @@ int main() {
 // Helper Function Definitions
 /* --------------------------------------------- */
 
+AppSettings loadSettings() {
+    // Every startup default lives in one file now — one-time settings (window/camera/renderer)
+    // and GUI sliders' starting values (terrain/chunks) alike.
+    INIReader settings_reader("assets/settings/settings.ini");
+
+    AppSettings settings{};
+    settings.window_width = 800;
+    settings.window_height = 800;
+    settings.window_title = settings_reader.Get("window", "title", WINDOW_TITLE);
+
+    settings.field_of_view = static_cast<float>(settings_reader.GetReal("camera", "fov", 60.0f));
+    settings.near_plane_distance = static_cast<float>(settings_reader.GetReal("camera", "near", 0.1f));
+    settings.far_plane_distance = static_cast<float>(settings_reader.GetReal("camera", "far", 100.0f));
+    settings.camera_position = glm::vec3(
+        static_cast<float>(settings_reader.GetReal("camera", "position_x", 0.0f)),
+        static_cast<float>(settings_reader.GetReal("camera", "position_y", 0.0f)),
+        static_cast<float>(settings_reader.GetReal("camera", "position_z", 0.0f))
+    );
+    // Same convention as the live fly-camera controls: yaw/pitch = 0 looks along +X; positive
+    // pitch looks up, negative looks down.
+    settings.camera_yaw = static_cast<float>(settings_reader.GetReal("camera", "yaw", 0.0f));
+    settings.camera_pitch = static_cast<float>(settings_reader.GetReal("camera", "pitch", 0.0f));
+
+    bool as_wireframe = settings_reader.GetBoolean("renderer", "wireframe", false);
+    if (as_wireframe) {
+        g_polygon_mode_index = 1;
+    }
+    bool with_backface_culling = settings_reader.GetBoolean("renderer", "backface_culling", false);
+    if (with_backface_culling) {
+        g_culling_index = 1;
+    }
+    g_draw_normals = settings_reader.GetBoolean("renderer", "normals", false);
+    settings.depthtest = settings_reader.GetBoolean("renderer", "depthtest", true);
+    settings.background_r = static_cast<float>(settings_reader.GetReal("renderer", "background_r", 0.14));
+    settings.background_g = static_cast<float>(settings_reader.GetReal("renderer", "background_g", 0.4));
+    settings.background_b = static_cast<float>(settings_reader.GetReal("renderer", "background_b", 0.37));
+
+    // Initial values for the "Terrain Controls" GUI sliders — every one of them stays live-
+    // adjustable from the GUI afterward, this only affects what they start at.
+    settings.initial_hurst = static_cast<float>(settings_reader.GetReal("terrain", "hurst", 0.8));
+    settings.initial_seed = static_cast<uint32_t>(settings_reader.GetInteger("terrain", "seed", 1337));
+    settings.initial_grid_size_exponent = static_cast<int>(settings_reader.GetInteger("terrain", "grid_size_exponent", 4));
+    settings.initial_height_scale = static_cast<float>(settings_reader.GetReal("terrain", "height_scale", 1.0));
+    settings.initial_roughness = static_cast<float>(settings_reader.GetReal("terrain", "roughness", 0.6));
+    settings.initial_water_level = static_cast<float>(settings_reader.GetReal("terrain", "water_level", 2.0));
+    g_camera_speed = static_cast<float>(settings_reader.GetReal("camera", "speed", 5.0));
+    g_chunk_view_radius = static_cast<int>(settings_reader.GetInteger("chunks", "view_radius", 16));
+    g_mouse_sensitivity = static_cast<float>(settings_reader.GetReal("camera", "mouse_sensitivity", 0.005));
+    g_scroll_sensitivity = static_cast<float>(settings_reader.GetReal("camera", "scroll_sensitivity", 0.5));
+
+    g_dirlight_color = glm::vec3(
+        static_cast<float>(settings_reader.GetReal("light", "color_r", 0.85)),
+        static_cast<float>(settings_reader.GetReal("light", "color_g", 0.85)),
+        static_cast<float>(settings_reader.GetReal("light", "color_b", 0.85))
+    );
+    g_dirlight_dir = glm::vec3(
+        static_cast<float>(settings_reader.GetReal("light", "dir_x", 0.0)),
+        static_cast<float>(settings_reader.GetReal("light", "dir_y", 1.0)),
+        static_cast<float>(settings_reader.GetReal("light", "dir_z", -1.0))
+    );
+
+    g_terrain_ka = static_cast<float>(settings_reader.GetReal("terrain", "ka", 0.1));
+    g_terrain_kd = static_cast<float>(settings_reader.GetReal("terrain", "kd", 0.9));
+    g_terrain_ks = static_cast<float>(settings_reader.GetReal("terrain", "ks", 0.3));
+    g_terrain_alpha = static_cast<float>(settings_reader.GetReal("terrain", "alpha", 10.0));
+    g_dirt_to_grass_height_offset = static_cast<float>(settings_reader.GetReal("terrain", "dirt_to_grass_height_offset", 3.0));
+    g_grass_to_rock_height_offset = static_cast<float>(settings_reader.GetReal("terrain", "grass_to_rock_height_offset", 10.0));
+    g_height_color_transition_band = static_cast<float>(settings_reader.GetReal("terrain", "height_color_transition_band", 2.0));
+    g_water_depth_bias = static_cast<float>(settings_reader.GetReal("terrain", "water_depth_bias", 0.05));
+    g_blend_duration = settings_reader.GetReal("terrain", "blend_duration", 2.0);
+
+    g_max_destroys_per_frame = static_cast<int>(settings_reader.GetInteger("chunks", "max_destroys_per_frame", 16));
+    g_max_uploads_per_frame = static_cast<int>(settings_reader.GetInteger("chunks", "max_uploads_per_frame", 8));
+
+    g_demo_height_interp_duration = settings_reader.GetReal("demo", "height_interp_duration", 1.0);
+    g_demo_water_interp_duration = settings_reader.GetReal("demo", "water_interp_duration", 1.0);
+
+    return settings;
+}
+
 void errorCallbackFromGlfw(int error, const char* description) { std::cout << "GLFW error " << error << ": " << description << std::endl; }
+
+void addInstanceExtensionToVectorIfSupported(const char* extension_name, std::vector<const char*>& ref_vector) {
+    VkResult result;
+
+    // Query how many instance extensions there are:
+    uint32_t instance_extension_count;
+    result = vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_count, nullptr);
+    VKL_CHECK_VULKAN_ERROR(result);
+    VKL_RETURN_ON_ERROR(result);
+
+    // Get all the instance extension names/properties there are:
+    std::vector<VkExtensionProperties> available_instance_extensions(instance_extension_count);
+    result = vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_count, available_instance_extensions.data());
+    VKL_CHECK_VULKAN_ERROR(result);
+    VKL_RETURN_ON_ERROR(result);
+
+    for (const VkExtensionProperties& available_extension : available_instance_extensions) {
+        if (strcmp(available_extension.extensionName, extension_name) == 0) {
+            // Found the extension => Add it to the vector:
+            ref_vector.push_back(extension_name);
+            return;
+        }
+    }
+}
+
+std::vector<const char*> getRequiredInstanceExtensions() {
+    std::vector<const char*> required_extensions;
+
+    // Query extensions which are required by GLFW, adding each one only if it is supported:
+    uint32_t glfw_instance_extensions_count;
+    const char** glfw_instance_extensions_names = glfwGetRequiredInstanceExtensions(&glfw_instance_extensions_count);
+    for (uint32_t i = 0; i < glfw_instance_extensions_count; ++i) {
+        addInstanceExtensionToVectorIfSupported(glfw_instance_extensions_names[i], required_extensions);
+    }
+
+    // Query extensions which are required by Vulkan Launchpad, adding each one only if it is supported:
+    uint32_t framework_instance_extensions_count;
+    const char** framework_instance_extensions_names = vklGetRequiredInstanceExtensions(&framework_instance_extensions_count);
+    for (uint32_t i = 0; i < framework_instance_extensions_count; ++i) {
+        addInstanceExtensionToVectorIfSupported(framework_instance_extensions_names[i], required_extensions);
+    }
+#ifdef __APPLE__
+    addInstanceExtensionToVectorIfSupported(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, required_extensions);
+#endif
+
+    return required_extensions;
+}
+
+void addValidationLayerNameToVectorIfSupported(const char* validation_layer_name, std::vector<const char*>& ref_vector) {
+    VkResult result;
+
+    // Query how many validation layers there are:
+    uint32_t layer_count;
+    result = vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
+    VKL_CHECK_VULKAN_ERROR(result);
+    VKL_RETURN_ON_ERROR(result);
+
+    // Get all the validation layer names/properties there are:
+    std::vector<VkLayerProperties> available_layers(layer_count);
+    result = vkEnumerateInstanceLayerProperties(&layer_count, available_layers.data());
+    VKL_CHECK_VULKAN_ERROR(result);
+    VKL_RETURN_ON_ERROR(result);
+
+    for (const VkLayerProperties& available_layer : available_layers) {
+        if (strcmp(available_layer.layerName, validation_layer_name) == 0) {
+            // Found the validation layer => Add it to the vector:
+            ref_vector.push_back(validation_layer_name);
+            return;
+        }
+    }
+}
 
 VkInstance createVulkanInstance() {
     VkApplicationInfo application_info = {};                     // Zero-initialize every member
@@ -1211,6 +1255,48 @@ VkSurfaceKHR createWindowSurface(VkInstance vk_instance, GLFWwindow* window) {
     return vk_surface;
 }
 
+uint32_t selectPhysicalDeviceIndex(const VkPhysicalDevice* physical_devices, uint32_t physical_device_count, VkSurfaceKHR surface) {
+    // Iterate over all the physical devices and select one that satisfies all our requirements.
+    // Our requirements are:
+    //  - Must support a queue that must have both, graphics and presentation capabilities
+    for (uint32_t physical_device_index = 0u; physical_device_index < physical_device_count; ++physical_device_index) {
+        // Check if fillModeNonSolid is supported
+        VkPhysicalDeviceFeatures features;
+        vkGetPhysicalDeviceFeatures(physical_devices[physical_device_index], &features);
+        if (VK_TRUE != features.fillModeNonSolid) {
+            continue; // This physical device does not support it => look for a different one
+        }
+
+        // Get the number of different queue families:
+        uint32_t queue_family_count = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(physical_devices[physical_device_index], &queue_family_count, nullptr);
+
+        // Get the queue families' data:
+        std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
+        vkGetPhysicalDeviceQueueFamilyProperties(physical_devices[physical_device_index], &queue_family_count, queue_families.data());
+
+        for (uint32_t queue_family_index = 0u; queue_family_index < queue_family_count; ++queue_family_index) {
+            // If this physical device supports a queue family which supports both, graphics and presentation
+            //  => select this physical device
+            if ((queue_families[queue_family_index].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) {
+                // This queue supports graphics! Let's see if it also supports presentation:
+                VkBool32 presentation_supported;
+                vkGetPhysicalDeviceSurfaceSupportKHR(physical_devices[physical_device_index], queue_family_index, surface, &presentation_supported);
+
+                if (VK_TRUE == presentation_supported) {
+                    // We've found a suitable physical device
+                    return physical_device_index;
+                }
+            }
+        }
+    }
+    VKL_EXIT_WITH_ERROR("Unable to find a suitable physical device that supports graphics and presentation on the same queue.");
+}
+
+uint32_t selectPhysicalDeviceIndex(const std::vector<VkPhysicalDevice>& physical_devices, VkSurfaceKHR surface) {
+    return selectPhysicalDeviceIndex(physical_devices.data(), static_cast<uint32_t>(physical_devices.size()), surface);
+}
+
 VkPhysicalDevice pickPhysicalDevice(VkInstance vk_instance, VkSurfaceKHR vk_surface) {
     // Query the number of physical devices:
     uint32_t physical_devices_count;
@@ -1229,6 +1315,30 @@ VkPhysicalDevice pickPhysicalDevice(VkInstance vk_instance, VkSurfaceKHR vk_surf
         VKL_EXIT_WITH_ERROR("No VkPhysicalDevice selected or handle not assigned.");
     }
     return vk_physical_device;
+}
+
+uint32_t selectQueueFamilyIndex(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
+    // Get the number of different queue families for the given physical device:
+    uint32_t queue_family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, nullptr);
+
+    // Get the queue families' data:
+    std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.data());
+    for (uint32_t queue_family_index = 0u; queue_family_index < queue_family_count; ++queue_family_index) {
+        if ((queue_families[queue_family_index].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) {
+            // This queue supports graphics! Let's see if it also supports presentation:
+            VkBool32 presentation_supported;
+            vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, queue_family_index, surface, &presentation_supported);
+
+            if (VK_TRUE == presentation_supported) {
+                // We've found a suitable queue family on the given physical device and for the given surface
+                //  => return its INDEX:
+                return queue_family_index;
+            }
+        }
+    }
+    VKL_EXIT_WITH_ERROR("Unable to find a suitable queue family that supports graphics and presentation on the same queue.");
 }
 
 VkDeviceQueueCreateInfo createQueueCreateInfo(VkPhysicalDevice vk_physical_device, uint32_t selected_queue_family_index) {
@@ -1250,6 +1360,30 @@ VkDeviceQueueCreateInfo createQueueCreateInfo(VkPhysicalDevice vk_physical_devic
         VKL_EXIT_WITH_ERROR("Invalid queue family index selected.");
     }
     return device_queue_create_info;
+}
+
+void addDeviceExtensionToVectorIfSupported(const char* extension_name, VkPhysicalDevice physical_device, std::vector<const char*>& ref_vector) {
+    VkResult result;
+
+    // Query how many device extensions there are:
+    uint32_t extensions_count;
+    result = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extensions_count, nullptr);
+    VKL_CHECK_VULKAN_ERROR(result);
+    VKL_RETURN_ON_ERROR(result);
+
+    // Get all the device extensions:
+    std::vector<VkExtensionProperties> available_extensions(extensions_count);
+    result = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extensions_count, available_extensions.data());
+    VKL_CHECK_VULKAN_ERROR(result);
+    VKL_RETURN_ON_ERROR(result);
+
+    for (const VkExtensionProperties& available_extension : available_extensions) {
+        if (strcmp(available_extension.extensionName, extension_name) == 0) {
+            // Found the extension => Add it to the vector:
+            ref_vector.push_back(extension_name);
+            return;
+        }
+    }
 }
 
 VkDevice createLogicalDeviceAndQueue(
@@ -1316,6 +1450,38 @@ VkDevice createLogicalDeviceAndQueue(
         VKL_EXIT_WITH_ERROR("No VkQueue selected or handle not assigned.");
     }
     return vk_device;
+}
+
+VkSurfaceFormatKHR getSurfaceImageFormat(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
+    VkResult result;
+
+    uint32_t surface_format_count;
+    result = vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &surface_format_count, nullptr);
+    VKL_CHECK_VULKAN_ERROR(result);
+
+    std::vector<VkSurfaceFormatKHR> surface_formats(surface_format_count);
+    result = vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &surface_format_count, surface_formats.data());
+    VKL_CHECK_VULKAN_ERROR(result);
+
+    if (surface_formats.empty()) {
+        VKL_EXIT_WITH_ERROR("Unable to find supported surface formats.");
+    }
+
+    // Prefer a RGB8/sRGB format; If we are unable to find such, just return any:
+    for (const VkSurfaceFormatKHR& f : surface_formats) {
+        if ((f.format == VK_FORMAT_B8G8R8A8_SRGB || f.format == VK_FORMAT_R8G8B8A8_SRGB) && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            return f;
+        }
+    }
+
+    return surface_formats[0];
+}
+
+VkSurfaceCapabilitiesKHR getPhysicalDeviceSurfaceCapabilities(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
+    VkSurfaceCapabilitiesKHR surface_capabilities;
+    VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &surface_capabilities);
+    VKL_CHECK_VULKAN_ERROR(result);
+    return surface_capabilities;
 }
 
 SwapchainSetup createSwapchain(
@@ -1385,6 +1551,15 @@ SwapchainSetup createSwapchain(
     vkGetSwapchainImagesKHR(vk_device, setup.swapchain, &swapchain_image_count, setup.image_handles.data());
 
     return setup;
+}
+
+std::optional<Hit> raycastTerrain(const glm::vec3& origin, const glm::vec3& direction) {
+    constexpr float kGroundPlaneZ = 0.0f;
+    if (std::abs(direction.z) < 1e-6f) return std::nullopt;
+    float t = (kGroundPlaneZ - origin.z) / direction.z;
+    if (t < 0.0f) return std::nullopt;
+    glm::vec3 point = origin + t * direction;
+    return Hit{point, t};
 }
 
 VkImage createDepthBuffer(VkPhysicalDevice vk_physical_device, VkDevice vk_device, int width, int height) {
@@ -1460,6 +1635,383 @@ void initImGui(
     imgui_init_info.PipelineInfoMain.Subpass = 0u;
     imgui_init_info.MinAllocationSize = 1024u * 1024u;
     ImGui_ImplVulkan_Init(&imgui_init_info);
+}
+
+/* --------------------------------------------- */
+// Build the terrain pipeline for given polygon and cull modes
+/* --------------------------------------------- */
+
+VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_index, size_t cull_mode_index) {
+    VklGraphicsPipelineConfig pipeline_config{
+        scene.vertexShaderPath.c_str(),
+        scene.fragmentShaderPath.c_str(),
+        {
+            VkVertexInputBindingDescription{0u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
+            VkVertexInputBindingDescription{1u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
+            VkVertexInputBindingDescription{2u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
+            VkVertexInputBindingDescription{3u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
+        },
+        {
+            VkVertexInputAttributeDescription{0u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
+            VkVertexInputAttributeDescription{1u, 1u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
+            VkVertexInputAttributeDescription{2u, 2u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
+            VkVertexInputAttributeDescription{3u, 3u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
+        },
+        /* --------------------------------------------- */
+        // Wireframe Mode
+        /* --------------------------------------------- */
+        kTerrainPolygonModes[polygon_mode_index],
+        /* --------------------------------------------- */
+        // Back-face Culling
+        /* --------------------------------------------- */
+        kTerrainCullModes[cull_mode_index],
+        scene.descriptorSetLayoutBindings,
+        /* enableAlphaBlending: */ false,
+        {VkPushConstantRange{VK_SHADER_STAGE_VERTEX_BIT, 0u, sizeof(TerrainPushConstants)}},
+    };
+    return vklCreateGraphicsPipeline(pipeline_config);
+}
+
+VkDescriptorSet allocDescriptorSet(VkDevice device, VkDescriptorPool descriptor_pool, VkDescriptorSetLayout descriptor_set_layout) {
+    VkResult result;
+
+    // Prepare allocation info and allocate:
+    VkDescriptorSetAllocateInfo descriptor_set_allocate_info = {};
+    descriptor_set_allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptor_set_allocate_info.descriptorPool = descriptor_pool;
+    descriptor_set_allocate_info.descriptorSetCount = 1u;
+    descriptor_set_allocate_info.pSetLayouts = &descriptor_set_layout;
+
+    VkDescriptorSet descriptor_set;
+    result = vkAllocateDescriptorSets(device, &descriptor_set_allocate_info, &descriptor_set);
+    VKL_CHECK_VULKAN_RESULT(result);
+
+    if (result < VK_SUCCESS) {
+        VKL_EXIT_WITH_ERROR("Allocating a new descriptor set from the given pool and of the given layout failed.");
+    }
+
+    return descriptor_set;
+}
+
+void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer vert_buffer, VkBuffer frag_buffer) {
+    VkDescriptorBufferInfo vert_descriptor_buffer_info = {};
+    vert_descriptor_buffer_info.buffer = vert_buffer;
+    vert_descriptor_buffer_info.offset = static_cast<VkDeviceSize>(0);
+    vert_descriptor_buffer_info.range = VK_WHOLE_SIZE;
+
+    VkDescriptorBufferInfo frag_descriptor_buffer_info = {};
+    frag_descriptor_buffer_info.buffer = frag_buffer;
+    frag_descriptor_buffer_info.offset = static_cast<VkDeviceSize>(0);
+    frag_descriptor_buffer_info.range = VK_WHOLE_SIZE;
+
+    std::vector<VkWriteDescriptorSet> writes = {
+        VkWriteDescriptorSet{
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            nullptr,
+            descriptor_set,
+            /* dstBinding: */ 0u,
+            0u,
+            1u,
+            /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            nullptr,
+            /* pBufferInfo: */ &vert_descriptor_buffer_info,
+            nullptr
+        },
+        VkWriteDescriptorSet{
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            nullptr,
+            descriptor_set,
+            /* dstBinding: */ 1u,
+            0u,
+            1u,
+            /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            nullptr,
+            /* pBufferInfo: */ &frag_descriptor_buffer_info,
+            nullptr
+        },
+    };
+
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
+}
+
+void writeDescriptorSet(
+    VkDevice device,
+    VkDescriptorSet descriptor_set,
+    VkBuffer vert_buffer,
+    VkBuffer frag_buffer,
+    VkBuffer directional_light_data
+) {
+    writeDescriptorSet(device, descriptor_set, vert_buffer, frag_buffer);
+
+    VkDescriptorBufferInfo dirlight_buffer_info = {};
+    dirlight_buffer_info.buffer = directional_light_data;
+    dirlight_buffer_info.offset = static_cast<VkDeviceSize>(0);
+    dirlight_buffer_info.range = VK_WHOLE_SIZE;
+
+    std::vector<VkWriteDescriptorSet> writes = {VkWriteDescriptorSet{
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        nullptr,
+        descriptor_set,
+        /* dstBinding: */ 2u,
+        0u,
+        1u,
+        /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        nullptr,
+        /* pBufferInfo: */ &dirlight_buffer_info,
+        nullptr
+    }};
+
+    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
+}
+
+TerrainScene setupTerrainScene(
+    VkDevice vk_device,
+    VkQueue vk_queue,
+    uint32_t selected_queue_family_index,
+    TerrainParams& params,
+    float initial_height_scale,
+    float initial_roughness,
+    float initial_water_level
+) {
+    TerrainScene scene{};
+    scene.heightScale = initial_height_scale;
+    scene.roughness = initial_roughness;
+    scene.waterLevel = initial_water_level;
+    scene.chunkManager.baseParams = params;
+    scene.chunkManager.viewRadius = g_chunk_view_radius;
+    scene.chunkManager.blendDuration = g_blend_duration;
+    scene.chunkManager.maxDestroysPerFrame = g_max_destroys_per_frame;
+    scene.chunkManager.maxUploadsPerFrame = g_max_uploads_per_frame;
+    g_hurst = params.hurst;
+
+    /* --------------------------------------------- */
+    // Create a Custom Graphics Pipeline
+    /* --------------------------------------------- */
+    scene.descriptorSetLayoutBindings = {
+        VkDescriptorSetLayoutBinding{0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT, nullptr},
+        VkDescriptorSetLayoutBinding{1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+        VkDescriptorSetLayoutBinding{2u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
+    };
+    scene.vertexShaderPath = gcgFindShaderFile("assets/shaders/terrain.vert");
+    scene.fragmentShaderPath = gcgFindShaderFile("assets/shaders/terrain.frag");
+
+    /* --------------------------------------------- */
+    // Interaction
+    /* --------------------------------------------- */
+    scene.pipelines[g_polygon_mode_index][g_culling_index] = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
+
+    /* --------------------------------------------- */
+    // Allocate and Write Descriptors
+    /* --------------------------------------------- */
+    std::vector<VkDescriptorPoolSize> pool_sizes{VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3u}};
+
+    VkDescriptorPoolCreateInfo descriptor_pool_create_info = {};
+    descriptor_pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descriptor_pool_create_info.maxSets = 1u;
+    descriptor_pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
+    descriptor_pool_create_info.pPoolSizes = pool_sizes.data();
+
+    VkResult result = vkCreateDescriptorPool(vk_device, &descriptor_pool_create_info, nullptr, &scene.descriptor_pool);
+    VKL_CHECK_VULKAN_RESULT(result);
+
+    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {};
+    descriptor_set_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    // We can reuse the same layout description that we have passed to graphics pipeline creation:
+    descriptor_set_layout_create_info.bindingCount = static_cast<uint32_t>(scene.descriptorSetLayoutBindings.size());
+    descriptor_set_layout_create_info.pBindings = scene.descriptorSetLayoutBindings.data();
+
+    result = vkCreateDescriptorSetLayout(vk_device, &descriptor_set_layout_create_info, nullptr, &scene.descriptor_set_layout);
+    VKL_CHECK_VULKAN_RESULT(result);
+
+    VkDeviceSize num_dirlights = 1;
+    scene.ub_dirlight = vklCreateHostCoherentBufferWithBackingMemory(
+        sizeof(DirectionalLight) * num_dirlights,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+    );
+    DirectionalLight directional_light = {glm::vec4(g_dirlight_color, 0.0f), glm::normalize(glm::vec4(g_dirlight_dir, 0.0f))};
+    vklCopyDataIntoHostCoherentBuffer(scene.ub_dirlight, &directional_light, sizeof(DirectionalLight));
+
+    scene.ub_terrain_vert = vklCreateHostCoherentBufferWithBackingMemory(
+        sizeof(UniformBufferVert),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+    );
+    scene.ub_terrain_frag = vklCreateHostCoherentBufferWithBackingMemory(
+        sizeof(UniformBufferFrag),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+    );
+    scene.ds_terrain = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
+    writeDescriptorSet(vk_device, scene.ds_terrain, scene.ub_terrain_vert, scene.ub_terrain_frag, scene.ub_dirlight);
+
+    return scene;
+}
+
+void buildLoadingGUI(size_t pendingChunkCount) {
+    const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(main_viewport->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::Begin(
+        "Loading",
+        nullptr,
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove
+    );
+    ImGui::Text("Generating terrain... (%zu chunks remaining)", pendingChunkCount);
+    ImGui::End();
+}
+
+static size_t chunksStillGenerating(const ChunkManager& chunkManager) {
+    return chunkManager.pendingChunks.size() + chunkManager.readyForNormals.size() + chunkManager.pendingNormals.size();
+}
+
+void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& chunkManager, const glm::vec3& cameraPos) {
+    updateLoadedChunks(chunkManager, cameraPos, glfwGetTime());
+    while (chunksStillGenerating(chunkManager) > 0) {
+        glfwPollEvents();
+
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        buildLoadingGUI(chunksStillGenerating(chunkManager));
+        ImGui::Render();
+
+        vklWaitForNextSwapchainImage();
+        vklStartRecordingCommands();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
+        vklEndRecordingCommands();
+        vklPresentCurrentSwapchainImage();
+
+        updateLoadedChunks(chunkManager, cameraPos, glfwGetTime());
+    }
+}
+
+WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_params) {
+    WaterScene scene{};
+
+    scene.vertexShaderPath = gcgFindShaderFile("assets/shaders/water.vert");
+    scene.fragmentShaderPath = gcgFindShaderFile("assets/shaders/water.frag");
+
+    std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings = {
+        VkDescriptorSetLayoutBinding{0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT, nullptr},
+    };
+
+    VklGraphicsPipelineConfig pipeline_config{
+        scene.vertexShaderPath.c_str(),
+        scene.fragmentShaderPath.c_str(),
+        {VkVertexInputBindingDescription{0u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX}},
+        {VkVertexInputAttributeDescription{0u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 0u}},
+        VK_POLYGON_MODE_FILL,
+        VK_CULL_MODE_NONE,
+        descriptor_set_layout_bindings,
+        /* enableAlphaBlending: */ true,
+    };
+    scene.pipeline = vklCreateGraphicsPipeline(pipeline_config);
+
+    std::vector<VkDescriptorPoolSize> pool_sizes{VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u}};
+    VkDescriptorPoolCreateInfo descriptor_pool_create_info = {};
+    descriptor_pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descriptor_pool_create_info.maxSets = 1u;
+    descriptor_pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
+    descriptor_pool_create_info.pPoolSizes = pool_sizes.data();
+    VkResult result = vkCreateDescriptorPool(vk_device, &descriptor_pool_create_info, nullptr, &scene.descriptor_pool);
+    VKL_CHECK_VULKAN_RESULT(result);
+
+    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {};
+    descriptor_set_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptor_set_layout_create_info.bindingCount = static_cast<uint32_t>(descriptor_set_layout_bindings.size());
+    descriptor_set_layout_create_info.pBindings = descriptor_set_layout_bindings.data();
+    result = vkCreateDescriptorSetLayout(vk_device, &descriptor_set_layout_create_info, nullptr, &scene.descriptor_set_layout);
+    VKL_CHECK_VULKAN_RESULT(result);
+
+    scene.ub_water_vert = vklCreateHostCoherentBufferWithBackingMemory(
+        sizeof(UniformBufferWaterVert),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+    );
+    scene.ds_water = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
+
+    VkDescriptorBufferInfo vert_buffer_info = {};
+    vert_buffer_info.buffer = scene.ub_water_vert;
+    vert_buffer_info.offset = static_cast<VkDeviceSize>(0);
+    vert_buffer_info.range = VK_WHOLE_SIZE;
+    VkWriteDescriptorSet write{
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        nullptr,
+        scene.ds_water,
+        /* dstBinding: */ 0u,
+        0u,
+        1u,
+        /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        nullptr,
+        /* pBufferInfo: */ &vert_buffer_info,
+        nullptr
+    };
+    vkUpdateDescriptorSets(vk_device, 1u, &write, 0u, nullptr);
+
+    // chunkGeometry is populated lazily by updateWaterChunks() as chunks load.
+    return scene;
+}
+
+/*!
+ *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
+ *	mouse button input that can be processed by our application.
+ */
+void mouseButtonCallbackFromGlfw(GLFWwindow* glfw_window, int button, int action, int mods) {
+    ImGui_ImplGlfw_MouseButtonCallback(glfw_window, button, action, mods);
+    if (ImGui::GetIO().WantCaptureMouse) return;
+
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+        g_dragging = true;
+    } else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) {
+        g_dragging = false;
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
+        g_strafing = true;
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE) {
+        g_strafing = false;
+    }
+}
+
+/*!
+ *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
+ *	mouse scroll input that can be processed by our application.
+ */
+void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoffset) {
+    ImGui_ImplGlfw_ScrollCallback(glfw_window, xoffset, yoffset);
+    if (ImGui::GetIO().WantCaptureMouse) return;
+
+    g_scroll_delta += static_cast<float>(yoffset);
+}
+
+void framebufferSizeCallbackFromGlfw(GLFWwindow* glfw_window, int width, int height) { g_framebuffer_resized = true; }
+
+void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int action, int mods) {
+    ImGui_ImplGlfw_KeyCallback(glfw_window, key, scancode, action, mods);
+    if (ImGui::GetIO().WantCaptureKeyboard) return;
+
+    if (action != GLFW_RELEASE) return;
+    if (key == GLFW_KEY_ESCAPE) {
+        glfwSetWindowShouldClose(glfw_window, true);
+    }
+    /* --------------------------------------------- */
+    // Interaction
+    /* --------------------------------------------- */
+    if (key == GLFW_KEY_F1) {
+        g_polygon_mode_index = 1 - g_polygon_mode_index;
+    }
+    if (key == GLFW_KEY_F2) {
+        g_culling_index = (g_culling_index + 1) % 3;
+    }
+    if (key == GLFW_KEY_F3) {
+        g_highlight_chunk_borders = !g_highlight_chunk_borders;
+    }
+    if (key == GLFW_KEY_N) {
+        g_draw_normals = !g_draw_normals;
+    }
+    if (key == GLFW_KEY_C) {
+        g_toggle_camera_requested = true;
+    }
+    if (key == GLFW_KEY_R) {
+        g_reseed_requested = true;
+    }
+    if (key == GLFW_KEY_F4) {
+        g_demo_mode = !g_demo_mode;
+    }
 }
 
 void recreateSwapchainAndDependents(
@@ -1589,10 +2141,36 @@ void handleCameraToggleRequest(
     mouse_y_last = mouse_y;
 }
 
+uint32_t generateRandomSeed() {
+    static std::mt19937 rng(std::random_device{}());
+    static std::uniform_int_distribution<uint32_t> dist;
+    return dist(rng);
+}
+
+// Inset from the slider's full [0,1] range to avoid the visually-degenerate extremes (near-flat at
+// 1, near-white-noise at 0).
+float generateRandomHurst() {
+    static std::mt19937 rng(std::random_device{}());
+    static std::uniform_real_distribution<float> dist(0.4f, 0.95f);
+    return dist(rng);
+}
+
+float generateRandomHeightScale() {
+    static std::mt19937 rng(std::random_device{}());
+    static std::uniform_real_distribution<float> dist(1.0f, 5.0f);
+    return dist(rng);
+}
+
+// Inset from the slider's full [-25, 25] range — comfortably varied without drifting the water
+// plane absurdly far from where the terrain actually sits.
+float generateRandomWaterLevel() {
+    static std::mt19937 rng(std::random_device{}());
+    static std::uniform_real_distribution<float> dist(-15.0f, 15.0f);
+    return dist(rng);
+}
+
 void updateTerrainState(TerrainScene& terrain_scene, double currentFrameTime) {
-    // Both triggers are ignored while a previous regeneration is still resolving or blending —
-    // the GUI already disables the Hurst slider/Reseed button for the same reason (see buildGUI),
-    // but the R key shortcut bypasses the GUI, so it needs this guard too.
+    // Both triggers are ignored while a previous regeneration is still resolving or blending.
     if (g_reseed_requested) {
         g_reseed_requested = false;
         if (!isRegenerating(terrain_scene.chunkManager)) {
@@ -1611,8 +2189,7 @@ void updateTerrainState(TerrainScene& terrain_scene, double currentFrameTime) {
         }
     }
 
-    // Demo mode (F4): fires the instant the previous regeneration's blend has fully settled, so
-    // the terrain keeps morphing continuously without ever overlapping two regenerations.
+    // Demo mode (F4): fires the instant the previous regeneration's blend has fully settled.
     if (g_demo_mode && !isRegenerating(terrain_scene.chunkManager)) {
         g_hurst = generateRandomHurst();
         terrain_scene.chunkManager.baseParams.hurst = g_hurst;
@@ -1620,9 +2197,8 @@ void updateTerrainState(TerrainScene& terrain_scene, double currentFrameTime) {
         invalidateAllLoadedChunks(terrain_scene.chunkManager);
     }
 
-    // Demo mode's height scale: independent of the above, since it's just a real-time uniform
-    // (no regeneration needed) — picks a new random target every second and smoothly interpolates
-    // toward it, so the exaggeration keeps drifting continuously instead of popping.
+    // Demo mode's height scale: independent of the above — picks a new random target every second
+    // and smoothly interpolates toward it.
     if (g_demo_mode) {
         if (g_demo_height_interp_start_time < 0.0) {
             // First activation: interpolate from whatever the height scale currently is.
@@ -1662,6 +2238,31 @@ void updateTerrainState(TerrainScene& terrain_scene, double currentFrameTime) {
     if (g_chunk_view_radius_changed) {
         g_chunk_view_radius_changed = false;
         terrain_scene.chunkManager.viewRadius = g_chunk_view_radius;
+    }
+}
+
+void updateWaterChunks(VkDevice vk_device, WaterScene& scene, const ChunkManager& chunkManager) {
+    // Create a water quad for any newly-loaded terrain chunk.
+    for (auto& entry : chunkManager.loadedChunks) {
+        const ChunkCoord& coord = entry.first;
+        if (scene.chunkGeometry.count(coord)) continue;
+        scene.chunkGeometry[coord] = buildWaterChunkGeometry(coord, chunkManager.baseParams);
+    }
+
+    // Destroy the water quad for any chunk that's no longer loaded. Wait for the GPU to finish first
+    // — a previous frame's command buffer may still be referencing these buffers.
+    bool destroyed_any = false;
+    for (auto it = scene.chunkGeometry.begin(); it != scene.chunkGeometry.end();) {
+        if (!chunkManager.loadedChunks.count(it->first)) {
+            if (!destroyed_any) {
+                vkDeviceWaitIdle(vk_device);
+                destroyed_any = true;
+            }
+            destroyWaterChunkGeometry(it->second);
+            it = scene.chunkGeometry.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
@@ -1708,770 +2309,6 @@ void applyCameraInput(
 
     mouse_x_last = mouse_x;
     mouse_y_last = mouse_y;
-}
-
-void handleGlfwKeyCallback(GLFWwindow* glfw_window, int key, int scancode, int action, int mods) {
-    ImGui_ImplGlfw_KeyCallback(glfw_window, key, scancode, action, mods);
-    if (ImGui::GetIO().WantCaptureKeyboard) return;
-
-    if (action != GLFW_RELEASE) return;
-    if (key == GLFW_KEY_ESCAPE) {
-        glfwSetWindowShouldClose(glfw_window, true);
-    }
-    /* --------------------------------------------- */
-    // Interaction
-    /* --------------------------------------------- */
-    if (key == GLFW_KEY_F1) {
-        g_polygon_mode_index = 1 - g_polygon_mode_index;
-    }
-    if (key == GLFW_KEY_F2) {
-        g_culling_index = (g_culling_index + 1) % 3;
-    }
-    if (key == GLFW_KEY_F3) {
-        g_highlight_chunk_borders = !g_highlight_chunk_borders;
-    }
-    if (key == GLFW_KEY_N) {
-        g_draw_normals = !g_draw_normals;
-    }
-    if (key == GLFW_KEY_C) {
-        g_toggle_camera_requested = true;
-    }
-    if (key == GLFW_KEY_R) {
-        g_reseed_requested = true;
-    }
-    if (key == GLFW_KEY_F4) {
-        g_demo_mode = !g_demo_mode;
-    }
-}
-
-/*!
- *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
- *	mouse button input that can be processed by our application.
- */
-void mouseButtonCallbackFromGlfw(GLFWwindow* glfw_window, int button, int action, int mods) {
-    ImGui_ImplGlfw_MouseButtonCallback(glfw_window, button, action, mods);
-    if (ImGui::GetIO().WantCaptureMouse) return;
-
-    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-        g_dragging = true;
-    } else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) {
-        g_dragging = false;
-    } else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
-        g_strafing = true;
-    } else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE) {
-        g_strafing = false;
-    }
-}
-
-/*!
- *	This callback function gets invoked by GLFW during glfwPollEvents() if there was
- *	mouse scroll input that can be processed by our application.
- */
-void scrollCallbackFromGlfw(GLFWwindow* glfw_window, double xoffset, double yoffset) {
-    ImGui_ImplGlfw_ScrollCallback(glfw_window, xoffset, yoffset);
-    if (ImGui::GetIO().WantCaptureMouse) return;
-
-    g_scroll_delta += static_cast<float>(yoffset);
-}
-
-void framebufferSizeCallbackFromGlfw(GLFWwindow* glfw_window, int width, int height) { g_framebuffer_resized = true; }
-
-std::vector<const char*> getRequiredInstanceExtensions() {
-    std::vector<const char*> required_extensions;
-
-    // Query extensions which are required by GLFW, adding each one only if it is supported:
-    uint32_t glfw_instance_extensions_count;
-    const char** glfw_instance_extensions_names = glfwGetRequiredInstanceExtensions(&glfw_instance_extensions_count);
-    for (uint32_t i = 0; i < glfw_instance_extensions_count; ++i) {
-        addInstanceExtensionToVectorIfSupported(glfw_instance_extensions_names[i], required_extensions);
-    }
-
-    // Query extensions which are required by Vulkan Launchpad, adding each one only if it is supported:
-    uint32_t framework_instance_extensions_count;
-    const char** framework_instance_extensions_names = vklGetRequiredInstanceExtensions(&framework_instance_extensions_count);
-    for (uint32_t i = 0; i < framework_instance_extensions_count; ++i) {
-        addInstanceExtensionToVectorIfSupported(framework_instance_extensions_names[i], required_extensions);
-    }
-#ifdef __APPLE__
-    addInstanceExtensionToVectorIfSupported(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, required_extensions);
-#endif
-
-    return required_extensions;
-}
-
-uint32_t selectQueueFamilyIndex(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
-    // Get the number of different queue families for the given physical device:
-    uint32_t queue_family_count = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, nullptr);
-
-    // Get the queue families' data:
-    std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
-    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.data());
-    for (uint32_t queue_family_index = 0u; queue_family_index < queue_family_count; ++queue_family_index) {
-        if ((queue_families[queue_family_index].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) {
-            // This queue supports graphics! Let's see if it also supports presentation:
-            VkBool32 presentation_supported;
-            vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, queue_family_index, surface, &presentation_supported);
-
-            if (VK_TRUE == presentation_supported) {
-                // We've found a suitable queue family on the given physical device and for the given surface
-                //  => return its INDEX:
-                return queue_family_index;
-            }
-        }
-    }
-    VKL_EXIT_WITH_ERROR("Unable to find a suitable queue family that supports graphics and presentation on the same queue.");
-}
-
-void addInstanceExtensionToVectorIfSupported(const char* extension_name, std::vector<const char*>& ref_vector) {
-    VkResult result;
-
-    // Query how many instance extensions there are:
-    uint32_t instance_extension_count;
-    result = vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_count, nullptr);
-    VKL_CHECK_VULKAN_ERROR(result);
-    VKL_RETURN_ON_ERROR(result);
-
-    // Get all the instance extension names/properties there are:
-    std::vector<VkExtensionProperties> available_instance_extensions(instance_extension_count);
-    result = vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_count, available_instance_extensions.data());
-    VKL_CHECK_VULKAN_ERROR(result);
-    VKL_RETURN_ON_ERROR(result);
-
-    for (const VkExtensionProperties& available_extension : available_instance_extensions) {
-        if (strcmp(available_extension.extensionName, extension_name) == 0) {
-            // Found the extension => Add it to the vector:
-            ref_vector.push_back(extension_name);
-            return;
-        }
-    }
-}
-
-void addValidationLayerNameToVectorIfSupported(const char* validation_layer_name, std::vector<const char*>& ref_vector) {
-    VkResult result;
-
-    // Query how many validation layers there are:
-    uint32_t layer_count;
-    result = vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
-    VKL_CHECK_VULKAN_ERROR(result);
-    VKL_RETURN_ON_ERROR(result);
-
-    // Get all the validation layer names/properties there are:
-    std::vector<VkLayerProperties> available_layers(layer_count);
-    result = vkEnumerateInstanceLayerProperties(&layer_count, available_layers.data());
-    VKL_CHECK_VULKAN_ERROR(result);
-    VKL_RETURN_ON_ERROR(result);
-
-    for (const VkLayerProperties& available_layer : available_layers) {
-        if (strcmp(available_layer.layerName, validation_layer_name) == 0) {
-            // Found the validation layer => Add it to the vector:
-            ref_vector.push_back(validation_layer_name);
-            return;
-        }
-    }
-}
-
-void addDeviceExtensionToVectorIfSupported(const char* extension_name, VkPhysicalDevice physical_device, std::vector<const char*>& ref_vector) {
-    VkResult result;
-
-    // Query how many device extensions there are:
-    uint32_t extensions_count;
-    result = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extensions_count, nullptr);
-    VKL_CHECK_VULKAN_ERROR(result);
-    VKL_RETURN_ON_ERROR(result);
-
-    // Get all the device extensions:
-    std::vector<VkExtensionProperties> available_extensions(extensions_count);
-    result = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extensions_count, available_extensions.data());
-    VKL_CHECK_VULKAN_ERROR(result);
-    VKL_RETURN_ON_ERROR(result);
-
-    for (const VkExtensionProperties& available_extension : available_extensions) {
-        if (strcmp(available_extension.extensionName, extension_name) == 0) {
-            // Found the extension => Add it to the vector:
-            ref_vector.push_back(extension_name);
-            return;
-        }
-    }
-}
-
-uint32_t selectPhysicalDeviceIndex(const VkPhysicalDevice* physical_devices, uint32_t physical_device_count, VkSurfaceKHR surface) {
-    // Iterate over all the physical devices and select one that satisfies all our requirements.
-    // Our requirements are:
-    //  - Must support a queue that must have both, graphics and presentation capabilities
-    for (uint32_t physical_device_index = 0u; physical_device_index < physical_device_count; ++physical_device_index) {
-        // Check if fillModeNonSolid is supported
-        VkPhysicalDeviceFeatures features;
-        vkGetPhysicalDeviceFeatures(physical_devices[physical_device_index], &features);
-        if (VK_TRUE != features.fillModeNonSolid) {
-            continue; // This physical device does not support it => look for a different one
-        }
-
-        // Get the number of different queue families:
-        uint32_t queue_family_count = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(physical_devices[physical_device_index], &queue_family_count, nullptr);
-
-        // Get the queue families' data:
-        std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
-        vkGetPhysicalDeviceQueueFamilyProperties(physical_devices[physical_device_index], &queue_family_count, queue_families.data());
-
-        for (uint32_t queue_family_index = 0u; queue_family_index < queue_family_count; ++queue_family_index) {
-            // If this physical device supports a queue family which supports both, graphics and presentation
-            //  => select this physical device
-            if ((queue_families[queue_family_index].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) {
-                // This queue supports graphics! Let's see if it also supports presentation:
-                VkBool32 presentation_supported;
-                vkGetPhysicalDeviceSurfaceSupportKHR(physical_devices[physical_device_index], queue_family_index, surface, &presentation_supported);
-
-                if (VK_TRUE == presentation_supported) {
-                    // We've found a suitable physical device
-                    return physical_device_index;
-                }
-            }
-        }
-    }
-    VKL_EXIT_WITH_ERROR("Unable to find a suitable physical device that supports graphics and presentation on the same queue.");
-}
-
-uint32_t selectPhysicalDeviceIndex(const std::vector<VkPhysicalDevice>& physical_devices, VkSurfaceKHR surface) {
-    return selectPhysicalDeviceIndex(physical_devices.data(), static_cast<uint32_t>(physical_devices.size()), surface);
-}
-
-VkSurfaceFormatKHR getSurfaceImageFormat(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
-    VkResult result;
-
-    uint32_t surface_format_count;
-    result = vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &surface_format_count, nullptr);
-    VKL_CHECK_VULKAN_ERROR(result);
-
-    std::vector<VkSurfaceFormatKHR> surface_formats(surface_format_count);
-    result = vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &surface_format_count, surface_formats.data());
-    VKL_CHECK_VULKAN_ERROR(result);
-
-    if (surface_formats.empty()) {
-        VKL_EXIT_WITH_ERROR("Unable to find supported surface formats.");
-    }
-
-    // Prefer a RGB8/sRGB format; If we are unable to find such, just return any:
-    for (const VkSurfaceFormatKHR& f : surface_formats) {
-        if ((f.format == VK_FORMAT_B8G8R8A8_SRGB || f.format == VK_FORMAT_R8G8B8A8_SRGB) && f.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-            return f;
-        }
-    }
-
-    return surface_formats[0];
-}
-
-VkSurfaceCapabilitiesKHR getPhysicalDeviceSurfaceCapabilities(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
-    VkSurfaceCapabilitiesKHR surface_capabilities;
-    VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device, surface, &surface_capabilities);
-    VKL_CHECK_VULKAN_ERROR(result);
-    return surface_capabilities;
-}
-
-VkSurfaceTransformFlagBitsKHR getSurfaceTransform(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
-    return getPhysicalDeviceSurfaceCapabilities(physical_device, surface).currentTransform;
-}
-
-VkDescriptorSet allocDescriptorSet(VkDevice device, VkDescriptorPool descriptor_pool, VkDescriptorSetLayout descriptor_set_layout) {
-    VkResult result;
-
-    // Prepare allocation info and allocate:
-    VkDescriptorSetAllocateInfo descriptor_set_allocate_info = {};
-    descriptor_set_allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptor_set_allocate_info.descriptorPool = descriptor_pool;
-    descriptor_set_allocate_info.descriptorSetCount = 1u;
-    descriptor_set_allocate_info.pSetLayouts = &descriptor_set_layout;
-
-    VkDescriptorSet descriptor_set;
-    result = vkAllocateDescriptorSets(device, &descriptor_set_allocate_info, &descriptor_set);
-    VKL_CHECK_VULKAN_RESULT(result);
-
-    if (result < VK_SUCCESS) {
-        VKL_EXIT_WITH_ERROR("Allocating a new descriptor set from the given pool and of the given layout failed.");
-    }
-
-    return descriptor_set;
-}
-
-void writeDescriptorSet(VkDevice device, VkDescriptorSet descriptor_set, VkBuffer vert_buffer, VkBuffer frag_buffer) {
-    VkDescriptorBufferInfo vert_descriptor_buffer_info = {};
-    vert_descriptor_buffer_info.buffer = vert_buffer;
-    vert_descriptor_buffer_info.offset = static_cast<VkDeviceSize>(0);
-    vert_descriptor_buffer_info.range = VK_WHOLE_SIZE;
-
-    VkDescriptorBufferInfo frag_descriptor_buffer_info = {};
-    frag_descriptor_buffer_info.buffer = frag_buffer;
-    frag_descriptor_buffer_info.offset = static_cast<VkDeviceSize>(0);
-    frag_descriptor_buffer_info.range = VK_WHOLE_SIZE;
-
-    std::vector<VkWriteDescriptorSet> writes = {
-        VkWriteDescriptorSet{
-            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            nullptr,
-            descriptor_set,
-            /* dstBinding: */ 0u,
-            0u,
-            1u,
-            /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            nullptr,
-            /* pBufferInfo: */ &vert_descriptor_buffer_info,
-            nullptr
-        },
-        VkWriteDescriptorSet{
-            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            nullptr,
-            descriptor_set,
-            /* dstBinding: */ 1u,
-            0u,
-            1u,
-            /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            nullptr,
-            /* pBufferInfo: */ &frag_descriptor_buffer_info,
-            nullptr
-        },
-    };
-
-    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
-}
-
-void writeDescriptorSet(
-    VkDevice device,
-    VkDescriptorSet descriptor_set,
-    VkBuffer vert_buffer,
-    VkBuffer frag_buffer,
-    VkBuffer directional_light_data
-) {
-    writeDescriptorSet(device, descriptor_set, vert_buffer, frag_buffer);
-
-    VkDescriptorBufferInfo dirlight_buffer_info = {};
-    dirlight_buffer_info.buffer = directional_light_data;
-    dirlight_buffer_info.offset = static_cast<VkDeviceSize>(0);
-    dirlight_buffer_info.range = VK_WHOLE_SIZE;
-
-    std::vector<VkWriteDescriptorSet> writes = {VkWriteDescriptorSet{
-        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        nullptr,
-        descriptor_set,
-        /* dstBinding: */ 2u,
-        0u,
-        1u,
-        /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        nullptr,
-        /* pBufferInfo: */ &dirlight_buffer_info,
-        nullptr
-    }};
-
-    vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0u, nullptr);
-}
-
-void drawGeometryWithMaterial(
-    VkPipeline pipeline,
-    const LoadedChunk& chunk,
-    VkBuffer indices_buffer,
-    uint32_t number_of_indices,
-    VkDescriptorSet material,
-    uint32_t num_instances
-) {
-    /* --------------------------------------------- */
-    // Command Buffer Recording
-    /* --------------------------------------------- */
-
-    // Get the current command buffer:
-    VkCommandBuffer cb = vklGetCurrentCommandBuffer();
-
-    // Record binding the descriptor set for subsequent draw calls into the command buffer:
-    VkPipelineLayout pipeline_layout = vklGetLayoutForPipeline(pipeline);
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u, &material, 0u, nullptr);
-
-    vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    // Not blending: `from` is empty, so substitute `to` in its place.
-    bool is_blending = chunk.from.vertexBuffer != VK_NULL_HANDLE;
-    const Geometry& geometry_from = is_blending ? chunk.from : chunk.to;
-    // Positions and normals share one combined buffer per Geometry — the same VkBuffer is bound
-    // twice here, once per offset, which Vulkan allows.
-    VkBuffer vertex_buffers[4] = {geometry_from.vertexBuffer, chunk.to.vertexBuffer, geometry_from.vertexBuffer, chunk.to.vertexBuffer};
-    VkDeviceSize offsets[4] = {0, 0, geometry_from.normalsOffset, chunk.to.normalsOffset};
-    vkCmdBindVertexBuffers(cb, 0u, 4u, vertex_buffers, offsets);
-
-    vkCmdBindIndexBuffer(cb, indices_buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cb, number_of_indices, num_instances, 0u, 0u, 0u);
-}
-
-/* --------------------------------------------- */
-// Build the terrain pipeline for given polygon and cull modes
-/* --------------------------------------------- */
-
-VkPipeline buildTerrainPipeline(const TerrainScene& scene, size_t polygon_mode_index, size_t cull_mode_index) {
-    VklGraphicsPipelineConfig pipeline_config{
-        scene.vertexShaderPath.c_str(),
-        scene.fragmentShaderPath.c_str(),
-        {
-            VkVertexInputBindingDescription{0u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
-            VkVertexInputBindingDescription{1u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
-            VkVertexInputBindingDescription{2u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
-            VkVertexInputBindingDescription{3u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX},
-        },
-        {
-            VkVertexInputAttributeDescription{0u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
-            VkVertexInputAttributeDescription{1u, 1u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
-            VkVertexInputAttributeDescription{2u, 2u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
-            VkVertexInputAttributeDescription{3u, 3u, VK_FORMAT_R32G32B32_SFLOAT, 0u},
-        },
-        /* --------------------------------------------- */
-        // Wireframe Mode
-        /* --------------------------------------------- */
-        kTerrainPolygonModes[polygon_mode_index],
-        /* --------------------------------------------- */
-        // Back-face Culling
-        /* --------------------------------------------- */
-        kTerrainCullModes[cull_mode_index],
-        scene.descriptorSetLayoutBindings,
-        /* enableAlphaBlending: */ false,
-        {VkPushConstantRange{VK_SHADER_STAGE_VERTEX_BIT, 0u, sizeof(TerrainPushConstants)}},
-    };
-    return vklCreateGraphicsPipeline(pipeline_config);
-}
-
-TerrainScene setupTerrainScene(
-    VkDevice vk_device,
-    VkQueue vk_queue,
-    uint32_t selected_queue_family_index,
-    TerrainParams& params,
-    float initial_height_scale,
-    float initial_roughness,
-    float initial_water_level
-) {
-    TerrainScene scene{};
-    scene.heightScale = initial_height_scale;
-    scene.roughness = initial_roughness;
-    scene.waterLevel = initial_water_level;
-    scene.chunkManager.baseParams = params;
-    scene.chunkManager.viewRadius = g_chunk_view_radius;
-    scene.chunkManager.blendDuration = g_blend_duration;
-    scene.chunkManager.maxDestroysPerFrame = g_max_destroys_per_frame;
-    scene.chunkManager.maxUploadsPerFrame = g_max_uploads_per_frame;
-    g_hurst = params.hurst;
-
-    /* --------------------------------------------- */
-    // Create a Custom Graphics Pipeline
-    /* --------------------------------------------- */
-    scene.descriptorSetLayoutBindings = {
-        VkDescriptorSetLayoutBinding{0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT, nullptr},
-        VkDescriptorSetLayoutBinding{1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-        VkDescriptorSetLayoutBinding{2u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-    };
-    scene.vertexShaderPath = gcgFindShaderFile("assets/shaders/terrain.vert");
-    scene.fragmentShaderPath = gcgFindShaderFile("assets/shaders/terrain.frag");
-
-    /* --------------------------------------------- */
-    // Interaction
-    /* --------------------------------------------- */
-    scene.pipelines[g_polygon_mode_index][g_culling_index] = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
-
-    /* --------------------------------------------- */
-    // Allocate and Write Descriptors
-    /* --------------------------------------------- */
-    std::vector<VkDescriptorPoolSize> pool_sizes{VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3u}};
-
-    VkDescriptorPoolCreateInfo descriptor_pool_create_info = {};
-    descriptor_pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptor_pool_create_info.maxSets = 1u;
-    descriptor_pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
-    descriptor_pool_create_info.pPoolSizes = pool_sizes.data();
-
-    VkResult result = vkCreateDescriptorPool(vk_device, &descriptor_pool_create_info, nullptr, &scene.descriptor_pool);
-    VKL_CHECK_VULKAN_RESULT(result);
-
-    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {};
-    descriptor_set_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    // We can reuse the same layout description that we have passed to graphics pipeline creation:
-    descriptor_set_layout_create_info.bindingCount = static_cast<uint32_t>(scene.descriptorSetLayoutBindings.size());
-    descriptor_set_layout_create_info.pBindings = scene.descriptorSetLayoutBindings.data();
-
-    result = vkCreateDescriptorSetLayout(vk_device, &descriptor_set_layout_create_info, nullptr, &scene.descriptor_set_layout);
-    VKL_CHECK_VULKAN_RESULT(result);
-
-    VkDeviceSize num_dirlights = 1;
-    scene.ub_dirlight = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(DirectionalLight) * num_dirlights,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-    );
-    DirectionalLight directional_light = {glm::vec4(g_dirlight_color, 0.0f), glm::normalize(glm::vec4(g_dirlight_dir, 0.0f))};
-    vklCopyDataIntoHostCoherentBuffer(scene.ub_dirlight, &directional_light, sizeof(DirectionalLight));
-
-    scene.ub_terrain_vert = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(UniformBufferVert),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-    );
-    scene.ub_terrain_frag = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(UniformBufferFrag),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-    );
-    scene.ds_terrain = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
-    writeDescriptorSet(vk_device, scene.ds_terrain, scene.ub_terrain_vert, scene.ub_terrain_frag, scene.ub_dirlight);
-
-    return scene;
-}
-
-void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera* camera, double currentTime) {
-    // Shared, scene-level uniforms: identical for every chunk, since chunk position is already
-    // baked into each chunk's own vertex data.
-    UniformBufferVert ub_vert_data;
-    ub_vert_data.modelMatrix = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, scene.heightScale));
-    ub_vert_data.modelMatrixForNormals = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, 1 / scene.heightScale));
-    ub_vert_data.viewProjMatrix = camera->getViewProjectionMatrix();
-    vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_vert, &ub_vert_data, sizeof(UniformBufferVert));
-
-    UniformBufferFrag ub_frag_data;
-    ub_frag_data.cameraPosition = glm::vec4{camera->getPosition(), 1.0f};
-    ub_frag_data.materialProperties = {g_terrain_ka, g_terrain_kd, g_terrain_ks, g_terrain_alpha};
-    ub_frag_data.debugToggles = glm::uvec2{g_draw_normals ? 1u : 0u, g_highlight_chunk_borders ? 1u : 0u};
-    ub_frag_data.isUnderwater = camera->getPosition().z < scene.waterLevel * scene.heightScale ? 1 : 0;
-    int gridSize = (1 << scene.chunkManager.baseParams.gridSizeExponent) + 1;
-    ub_frag_data.chunkWidth = static_cast<float>((gridSize - 1) * scene.chunkManager.baseParams.spacing);
-    ub_frag_data.roughness = scene.roughness;
-    ub_frag_data.dirtToGrassHeight = scene.waterLevel + g_dirt_to_grass_height_offset;
-    ub_frag_data.grassToRockHeight = scene.waterLevel + g_grass_to_rock_height_offset;
-    ub_frag_data.heightColorTransitionBand = g_height_color_transition_band;
-    vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_frag, &ub_frag_data, sizeof(UniformBufferFrag));
-
-    VkPipeline& selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
-    if (selected_pipeline == VK_NULL_HANDLE) {
-        selected_pipeline = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
-    }
-
-    VkCommandBuffer cb = vklGetCurrentCommandBuffer();
-    VkPipelineLayout pipeline_layout = vklGetLayoutForPipeline(selected_pipeline);
-
-    // One draw call per loaded chunk, all against the same pipeline/descriptor set above — only
-    // the vertex/index buffers and the push-constant blend state differ per chunk.
-    for (auto& entry : scene.chunkManager.loadedChunks) {
-        const LoadedChunk& chunk = entry.second;
-        bool is_blending = chunk.from.vertexBuffer != VK_NULL_HANDLE;
-        float blend_factor =
-            is_blending ? glm::clamp(static_cast<float>((currentTime - chunk.blendStartTime) / scene.chunkManager.blendDuration), 0.0f, 1.0f) : 1.0f;
-
-        TerrainPushConstants push_constants{blend_factor, is_blending ? 1u : 0u};
-        vkCmdPushConstants(cb, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0u, sizeof(TerrainPushConstants), &push_constants);
-
-        drawGeometryWithMaterial(
-            selected_pipeline,
-            chunk,
-            scene.chunkManager.sharedIndicesBuffer,
-            scene.chunkManager.sharedNumberOfIndices,
-            scene.ds_terrain
-        );
-    }
-}
-
-void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
-    vkDestroyDescriptorSetLayout(vk_device, scene.descriptor_set_layout, nullptr);
-    vkDestroyDescriptorPool(vk_device, scene.descriptor_pool, nullptr);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain_vert);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain_frag);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_dirlight);
-
-    for (size_t i = 0; i < POLYMODES; ++i) {
-        for (size_t j = 0; j < CULLMODES; ++j) {
-            vklDestroyGraphicsPipeline(scene.pipelines[i][j]);
-        }
-    }
-    cleanupChunkManager(scene.chunkManager);
-}
-
-WaterScene setupWaterScene(VkDevice vk_device, const TerrainParams& terrain_params) {
-    WaterScene scene{};
-
-    scene.vertexShaderPath = gcgFindShaderFile("assets/shaders/water.vert");
-    scene.fragmentShaderPath = gcgFindShaderFile("assets/shaders/water.frag");
-
-    std::vector<VkDescriptorSetLayoutBinding> descriptor_set_layout_bindings = {
-        VkDescriptorSetLayoutBinding{0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u, VK_SHADER_STAGE_VERTEX_BIT, nullptr},
-    };
-
-    VklGraphicsPipelineConfig pipeline_config{
-        scene.vertexShaderPath.c_str(),
-        scene.fragmentShaderPath.c_str(),
-        {VkVertexInputBindingDescription{0u, sizeof(float) * 3, VK_VERTEX_INPUT_RATE_VERTEX}},
-        {VkVertexInputAttributeDescription{0u, 0u, VK_FORMAT_R32G32B32_SFLOAT, 0u}},
-        VK_POLYGON_MODE_FILL,
-        VK_CULL_MODE_NONE,
-        descriptor_set_layout_bindings,
-        /* enableAlphaBlending: */ true,
-    };
-    scene.pipeline = vklCreateGraphicsPipeline(pipeline_config);
-
-    std::vector<VkDescriptorPoolSize> pool_sizes{VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1u}};
-    VkDescriptorPoolCreateInfo descriptor_pool_create_info = {};
-    descriptor_pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptor_pool_create_info.maxSets = 1u;
-    descriptor_pool_create_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
-    descriptor_pool_create_info.pPoolSizes = pool_sizes.data();
-    VkResult result = vkCreateDescriptorPool(vk_device, &descriptor_pool_create_info, nullptr, &scene.descriptor_pool);
-    VKL_CHECK_VULKAN_RESULT(result);
-
-    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {};
-    descriptor_set_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptor_set_layout_create_info.bindingCount = static_cast<uint32_t>(descriptor_set_layout_bindings.size());
-    descriptor_set_layout_create_info.pBindings = descriptor_set_layout_bindings.data();
-    result = vkCreateDescriptorSetLayout(vk_device, &descriptor_set_layout_create_info, nullptr, &scene.descriptor_set_layout);
-    VKL_CHECK_VULKAN_RESULT(result);
-
-    scene.ub_water_vert = vklCreateHostCoherentBufferWithBackingMemory(
-        sizeof(UniformBufferWaterVert),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
-    );
-    scene.ds_water = allocDescriptorSet(vk_device, scene.descriptor_pool, scene.descriptor_set_layout);
-
-    VkDescriptorBufferInfo vert_buffer_info = {};
-    vert_buffer_info.buffer = scene.ub_water_vert;
-    vert_buffer_info.offset = static_cast<VkDeviceSize>(0);
-    vert_buffer_info.range = VK_WHOLE_SIZE;
-    VkWriteDescriptorSet write{
-        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        nullptr,
-        scene.ds_water,
-        /* dstBinding: */ 0u,
-        0u,
-        1u,
-        /* descriptorType: */ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        nullptr,
-        /* pBufferInfo: */ &vert_buffer_info,
-        nullptr
-    };
-    vkUpdateDescriptorSets(vk_device, 1u, &write, 0u, nullptr);
-
-    // chunkGeometry is populated lazily by updateWaterChunks() as chunks load.
-    return scene;
-}
-
-void updateWaterChunks(VkDevice vk_device, WaterScene& scene, const ChunkManager& chunkManager) {
-    // Create a water quad for any newly-loaded terrain chunk.
-    for (auto& entry : chunkManager.loadedChunks) {
-        const ChunkCoord& coord = entry.first;
-        if (scene.chunkGeometry.count(coord)) continue;
-        scene.chunkGeometry[coord] = buildWaterChunkGeometry(coord, chunkManager.baseParams);
-    }
-
-    // Destroy the water quad for any chunk that's no longer loaded. Wait for the GPU to finish first
-    // — a previous frame's command buffer may still be referencing these buffers.
-    bool destroyed_any = false;
-    for (auto it = scene.chunkGeometry.begin(); it != scene.chunkGeometry.end();) {
-        if (!chunkManager.loadedChunks.count(it->first)) {
-            if (!destroyed_any) {
-                vkDeviceWaitIdle(vk_device);
-                destroyed_any = true;
-            }
-            destroyWaterChunkGeometry(it->second);
-            it = scene.chunkGeometry.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scene, const Camera* camera) {
-    UniformBufferWaterVert ub_data;
-    ub_data.modelMatrix =
-        glm::translate(glm::mat4{1.0f}, glm::vec3(0.0f, 0.0f, terrain_scene.waterLevel * terrain_scene.heightScale + g_water_depth_bias));
-    ub_data.viewProjMatrix = camera->getViewProjectionMatrix();
-    vklCopyDataIntoHostCoherentBuffer(scene.ub_water_vert, &ub_data, sizeof(UniformBufferWaterVert));
-
-    VkCommandBuffer cb = vklGetCurrentCommandBuffer();
-    VkPipelineLayout pipeline_layout = vklGetLayoutForPipeline(scene.pipeline);
-    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u, &scene.ds_water, 0u, nullptr);
-    vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, scene.pipeline);
-
-    // One draw call per loaded chunk's water tile, all against the same pipeline/descriptor set
-    // above — only the vertex/index buffers differ per chunk.
-    for (auto& entry : scene.chunkGeometry) {
-        const WaterChunkGeometry& geometry = entry.second;
-        VkBuffer vertex_buffers[1] = {geometry.positionsBuffer};
-        VkDeviceSize offsets[1] = {0};
-        vkCmdBindVertexBuffers(cb, 0u, 1u, vertex_buffers, offsets);
-        vkCmdBindIndexBuffer(cb, geometry.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cb, geometry.numberOfIndices, 1u, 0u, 0u, 0u);
-    }
-}
-
-void cleanupWaterScene(VkDevice vk_device, WaterScene& scene) {
-    for (auto& entry : scene.chunkGeometry) {
-        destroyWaterChunkGeometry(entry.second);
-    }
-    vkDestroyDescriptorSetLayout(vk_device, scene.descriptor_set_layout, nullptr);
-    vkDestroyDescriptorPool(vk_device, scene.descriptor_pool, nullptr);
-    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_water_vert);
-    vklDestroyGraphicsPipeline(scene.pipeline);
-}
-
-std::future<GeometryData> startTerrainGeneration(const TerrainParams& params) {
-    return std::async(std::launch::async, generateTerrainGeometry, params);
-}
-
-void buildLoadingGUI(size_t pendingChunkCount) {
-    const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(main_viewport->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::Begin(
-        "Loading",
-        nullptr,
-        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove
-    );
-    ImGui::Text("Generating terrain... (%zu chunks remaining)", pendingChunkCount);
-    ImGui::End();
-}
-
-static size_t chunksStillGenerating(const ChunkManager& chunkManager) {
-    return chunkManager.pendingChunks.size() + chunkManager.readyForNormals.size() + chunkManager.pendingNormals.size();
-}
-
-void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& chunkManager, const glm::vec3& cameraPos) {
-    updateLoadedChunks(chunkManager, cameraPos, glfwGetTime());
-    while (chunksStillGenerating(chunkManager) > 0) {
-        glfwPollEvents();
-
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-        buildLoadingGUI(chunksStillGenerating(chunkManager));
-        ImGui::Render();
-
-        vklWaitForNextSwapchainImage();
-        vklStartRecordingCommands();
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), vklGetCurrentCommandBuffer());
-        vklEndRecordingCommands();
-        vklPresentCurrentSwapchainImage();
-
-        updateLoadedChunks(chunkManager, cameraPos, glfwGetTime());
-    }
-}
-
-uint32_t generateRandomSeed() {
-    static std::mt19937 rng(std::random_device{}());
-    static std::uniform_int_distribution<uint32_t> dist;
-    return dist(rng);
-}
-
-// Inset from the slider's full [0,1] range to avoid the visually-degenerate extremes (near-flat at
-// 1, near-white-noise at 0).
-float generateRandomHurst() {
-    static std::mt19937 rng(std::random_device{}());
-    static std::uniform_real_distribution<float> dist(0.4f, 0.95f);
-    return dist(rng);
-}
-
-float generateRandomHeightScale() {
-    static std::mt19937 rng(std::random_device{}());
-    static std::uniform_real_distribution<float> dist(1.0f, 5.0f);
-    return dist(rng);
-}
-
-// Inset from the slider's full [-25, 25] range — comfortably varied without drifting the water
-// plane absurdly far from where the terrain actually sits.
-float generateRandomWaterLevel() {
-    static std::mt19937 rng(std::random_device{}());
-    static std::uniform_real_distribution<float> dist(-15.0f, 15.0f);
-    return dist(rng);
 }
 
 void labelThenRightAlignedWidget(const char* label, float widget_width) {
@@ -2576,11 +2413,135 @@ void buildGUI(TerrainScene& scene, const glm::vec3& cameraPosition, const glm::v
     ImGui::End();
 }
 
-std::optional<Hit> raycastTerrain(const glm::vec3& origin, const glm::vec3& direction) {
-    constexpr float kGroundPlaneZ = 0.0f;
-    if (std::abs(direction.z) < 1e-6f) return std::nullopt;
-    float t = (kGroundPlaneZ - origin.z) / direction.z;
-    if (t < 0.0f) return std::nullopt;
-    glm::vec3 point = origin + t * direction;
-    return Hit{point, t};
+void drawGeometryWithMaterial(
+    VkPipeline pipeline,
+    const LoadedChunk& chunk,
+    VkBuffer indices_buffer,
+    uint32_t number_of_indices,
+    VkDescriptorSet material,
+    uint32_t num_instances
+) {
+    /* --------------------------------------------- */
+    // Command Buffer Recording
+    /* --------------------------------------------- */
+
+    // Get the current command buffer:
+    VkCommandBuffer cb = vklGetCurrentCommandBuffer();
+
+    // Record binding the descriptor set for subsequent draw calls into the command buffer:
+    VkPipelineLayout pipeline_layout = vklGetLayoutForPipeline(pipeline);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u, &material, 0u, nullptr);
+
+    vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    // Not blending: `from` is empty, so substitute `to` in its place.
+    bool is_blending = chunk.from.vertexBuffer != VK_NULL_HANDLE;
+    const Geometry& geometry_from = is_blending ? chunk.from : chunk.to;
+    // Positions and normals share one combined buffer per Geometry — the same VkBuffer is bound
+    // twice here, once per offset, which Vulkan allows.
+    VkBuffer vertex_buffers[4] = {geometry_from.vertexBuffer, chunk.to.vertexBuffer, geometry_from.vertexBuffer, chunk.to.vertexBuffer};
+    VkDeviceSize offsets[4] = {0, 0, geometry_from.normalsOffset, chunk.to.normalsOffset};
+    vkCmdBindVertexBuffers(cb, 0u, 4u, vertex_buffers, offsets);
+
+    vkCmdBindIndexBuffer(cb, indices_buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cb, number_of_indices, num_instances, 0u, 0u, 0u);
+}
+
+void updateAndDrawTerrainScene(VkDevice vk_device, TerrainScene& scene, const Camera* camera, double currentTime) {
+    // Shared, scene-level uniforms: identical for every chunk, since chunk position is already
+    // baked into each chunk's own vertex data.
+    UniformBufferVert ub_vert_data;
+    ub_vert_data.modelMatrix = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, scene.heightScale));
+    ub_vert_data.modelMatrixForNormals = glm::scale(glm::mat4{1.0f}, glm::vec3(1.0f, 1.0f, 1 / scene.heightScale));
+    ub_vert_data.viewProjMatrix = camera->getViewProjectionMatrix();
+    vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_vert, &ub_vert_data, sizeof(UniformBufferVert));
+
+    UniformBufferFrag ub_frag_data;
+    ub_frag_data.cameraPosition = glm::vec4{camera->getPosition(), 1.0f};
+    ub_frag_data.materialProperties = {g_terrain_ka, g_terrain_kd, g_terrain_ks, g_terrain_alpha};
+    ub_frag_data.debugToggles = glm::uvec2{g_draw_normals ? 1u : 0u, g_highlight_chunk_borders ? 1u : 0u};
+    ub_frag_data.isUnderwater = camera->getPosition().z < scene.waterLevel * scene.heightScale ? 1 : 0;
+    int gridSize = (1 << scene.chunkManager.baseParams.gridSizeExponent) + 1;
+    ub_frag_data.chunkWidth = static_cast<float>((gridSize - 1) * scene.chunkManager.baseParams.spacing);
+    ub_frag_data.roughness = scene.roughness;
+    ub_frag_data.dirtToGrassHeight = scene.waterLevel + g_dirt_to_grass_height_offset;
+    ub_frag_data.grassToRockHeight = scene.waterLevel + g_grass_to_rock_height_offset;
+    ub_frag_data.heightColorTransitionBand = g_height_color_transition_band;
+    vklCopyDataIntoHostCoherentBuffer(scene.ub_terrain_frag, &ub_frag_data, sizeof(UniformBufferFrag));
+
+    VkPipeline& selected_pipeline = scene.pipelines[g_polygon_mode_index][g_culling_index];
+    if (selected_pipeline == VK_NULL_HANDLE) {
+        selected_pipeline = buildTerrainPipeline(scene, g_polygon_mode_index, g_culling_index);
+    }
+
+    VkCommandBuffer cb = vklGetCurrentCommandBuffer();
+    VkPipelineLayout pipeline_layout = vklGetLayoutForPipeline(selected_pipeline);
+
+    // One draw call per loaded chunk, all against the same pipeline/descriptor set above — only
+    // the vertex/index buffers and the push-constant blend state differ per chunk.
+    for (auto& entry : scene.chunkManager.loadedChunks) {
+        const LoadedChunk& chunk = entry.second;
+        bool is_blending = chunk.from.vertexBuffer != VK_NULL_HANDLE;
+        float blend_factor =
+            is_blending ? glm::clamp(static_cast<float>((currentTime - chunk.blendStartTime) / scene.chunkManager.blendDuration), 0.0f, 1.0f) : 1.0f;
+
+        TerrainPushConstants push_constants{blend_factor, is_blending ? 1u : 0u};
+        vkCmdPushConstants(cb, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0u, sizeof(TerrainPushConstants), &push_constants);
+
+        drawGeometryWithMaterial(
+            selected_pipeline,
+            chunk,
+            scene.chunkManager.sharedIndicesBuffer,
+            scene.chunkManager.sharedNumberOfIndices,
+            scene.ds_terrain
+        );
+    }
+}
+
+void updateAndDrawWaterScene(WaterScene& scene, const TerrainScene& terrain_scene, const Camera* camera) {
+    UniformBufferWaterVert ub_data;
+    ub_data.modelMatrix =
+        glm::translate(glm::mat4{1.0f}, glm::vec3(0.0f, 0.0f, terrain_scene.waterLevel * terrain_scene.heightScale + g_water_depth_bias));
+    ub_data.viewProjMatrix = camera->getViewProjectionMatrix();
+    vklCopyDataIntoHostCoherentBuffer(scene.ub_water_vert, &ub_data, sizeof(UniformBufferWaterVert));
+
+    VkCommandBuffer cb = vklGetCurrentCommandBuffer();
+    VkPipelineLayout pipeline_layout = vklGetLayoutForPipeline(scene.pipeline);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u, &scene.ds_water, 0u, nullptr);
+    vklCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, scene.pipeline);
+
+    // One draw call per loaded chunk's water tile, all against the same pipeline/descriptor set
+    // above — only the vertex/index buffers differ per chunk.
+    for (auto& entry : scene.chunkGeometry) {
+        const WaterChunkGeometry& geometry = entry.second;
+        VkBuffer vertex_buffers[1] = {geometry.positionsBuffer};
+        VkDeviceSize offsets[1] = {0};
+        vkCmdBindVertexBuffers(cb, 0u, 1u, vertex_buffers, offsets);
+        vkCmdBindIndexBuffer(cb, geometry.indicesBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cb, geometry.numberOfIndices, 1u, 0u, 0u, 0u);
+    }
+}
+
+void cleanupTerrainScene(VkDevice vk_device, TerrainScene& scene) {
+    vkDestroyDescriptorSetLayout(vk_device, scene.descriptor_set_layout, nullptr);
+    vkDestroyDescriptorPool(vk_device, scene.descriptor_pool, nullptr);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain_vert);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_terrain_frag);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_dirlight);
+
+    for (size_t i = 0; i < POLYMODES; ++i) {
+        for (size_t j = 0; j < CULLMODES; ++j) {
+            vklDestroyGraphicsPipeline(scene.pipelines[i][j]);
+        }
+    }
+    cleanupChunkManager(scene.chunkManager);
+}
+
+void cleanupWaterScene(VkDevice vk_device, WaterScene& scene) {
+    for (auto& entry : scene.chunkGeometry) {
+        destroyWaterChunkGeometry(entry.second);
+    }
+    vkDestroyDescriptorSetLayout(vk_device, scene.descriptor_set_layout, nullptr);
+    vkDestroyDescriptorPool(vk_device, scene.descriptor_pool, nullptr);
+    vklDestroyHostCoherentBufferAndItsBackingMemory(scene.ub_water_vert);
+    vklDestroyGraphicsPipeline(scene.pipeline);
 }
