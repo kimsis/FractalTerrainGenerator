@@ -10,7 +10,9 @@
 
 #include <VulkanLaunchpad.h>
 
-#include "DiamondSquareGenerator.h"
+#include <cmath>
+
+#include "../algorithms/DiamondSquareGenerator.h"
 
 // Positions and normals share one buffer (see Geometry::vertexBuffer); normals start at this
 // byte-aligned offset past the positions region.
@@ -71,4 +73,13 @@ void destroyGeometryGpuMemory(const Geometry& geometry) {
 
 void updateGeometryNormals(const Geometry& geometry, const std::vector<glm::vec3>& normals) {
     vklCopyDataIntoHostCoherentBuffer(geometry.vertexBuffer, geometry.normalsOffset, normals.data(), normals.size() * sizeof(normals[0]));
+}
+
+std::optional<Hit> raycastTerrain(const glm::vec3& origin, const glm::vec3& direction) {
+    constexpr float kGroundPlaneZ = 0.0f;
+    if (std::abs(direction.z) < 1e-6f) return std::nullopt;
+    float t = (kGroundPlaneZ - origin.z) / direction.z;
+    if (t < 0.0f) return std::nullopt;
+    glm::vec3 point = origin + t * direction;
+    return Hit{point, t};
 }

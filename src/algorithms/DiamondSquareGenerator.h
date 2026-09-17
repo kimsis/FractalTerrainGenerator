@@ -3,7 +3,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 
-#include "ChunkCoord.h"
+#include "../terrain/ChunkCoord.h"
 
 struct TerrainParams {
     int gridSizeExponent = 4; // gridSize = 2^gridSizeExponent + 1

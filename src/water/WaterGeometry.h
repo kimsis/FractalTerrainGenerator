@@ -4,8 +4,8 @@
 
 #include <cstdint>
 
-#include "ChunkCoord.h"
-#include "DiamondSquareGenerator.h"
+#include "../algorithms/DiamondSquareGenerator.h"
+#include "../terrain/ChunkCoord.h"
 
 /*!
  *	One loaded chunk's water quad: positions are baked directly in world space (that chunk's XY

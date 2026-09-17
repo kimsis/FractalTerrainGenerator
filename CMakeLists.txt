@@ -53,17 +53,25 @@ set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/imgui")
 #================================#
 add_executable(${PROJECT_NAME}
     src/Main.cpp
+    src/utils/AppSettings.h
+    src/utils/VulkanSetup.h
+    src/utils/VulkanSetup.cpp
     src/utils/MathUtils.h
     src/Camera/Camera.cpp
     src/terrain/TerrainGeometry.h
     src/terrain/TerrainGeometry.cpp
-    src/terrain/WaterGeometry.h
-    src/terrain/WaterGeometry.cpp
-    src/terrain/DiamondSquareGenerator.h
-    src/terrain/DiamondSquareGenerator.cpp
+    src/terrain/TerrainScene.h
+    src/terrain/TerrainScene.cpp
+    src/water/WaterGeometry.h
+    src/water/WaterGeometry.cpp
+    src/water/WaterScene.h
+    src/water/WaterScene.cpp
+    src/algorithms/DiamondSquareGenerator.h
+    src/algorithms/DiamondSquareGenerator.cpp
     src/terrain/ChunkCoord.h
     src/terrain/ChunkManager.h
     src/terrain/ChunkManager.cpp
+    src/lighting/SceneLighting.h
     ${IMGUI_DIR}/imgui_demo.cpp
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_draw.cpp

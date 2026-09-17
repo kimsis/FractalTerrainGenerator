@@ -11,9 +11,10 @@
 
 #include <cstdint>
 #include <glm/glm.hpp>
+#include <optional>
 #include <vector>
 
-#include "DiamondSquareGenerator.h"
+#include "../algorithms/DiamondSquareGenerator.h"
 
 /*!
  *	A struct that contains all data for a geometry object on the CPU-side
@@ -80,10 +81,30 @@ VkDeviceSize uploadVertexDataInPlace(VkBuffer vertexBuffer, const GeometryData& 
  *	Frees `geometry`'s vertex buffer, if it's non-null. A VK_NULL_HANDLE `vertexBuffer` is
  *	explicitly safe (a no-op). Only destroys the vertex buffer — a chunk's index buffer is freed
  *	separately, also via this function, wrapped in a throwaway Geometry.
+ *	@param	geometry	The Geometry whose vertexBuffer shall be freed.
  */
 void destroyGeometryGpuMemory(const Geometry& geometry);
 
 /*!
  *	Overwrites an already-uploaded Geometry's normals region in place, leaving positions untouched.
+ *	@param	geometry	The already-uploaded Geometry whose normals region shall be overwritten.
+ *	@param	normals		The new normals to write; must match the vertex count geometry was uploaded with.
  */
 void updateGeometryNormals(const Geometry& geometry, const std::vector<glm::vec3>& normals);
+
+/*!
+ * A raycast hit result.
+ */
+struct Hit {
+    glm::vec3 point;
+    float distance;
+};
+
+/*!
+ *	Intersects a ray with the terrain's ground plane (z = 0).
+ *	@param	origin		The ray's world-space origin.
+ *	@param	direction	The ray's world-space direction (need not be normalized).
+ *	@return		The hit point and distance along the ray, or std::nullopt if the ray is parallel
+ *				to the ground plane or points away from it.
+ */
+std::optional<Hit> raycastTerrain(const glm::vec3& origin, const glm::vec3& direction);

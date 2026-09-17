@@ -7,8 +7,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "../algorithms/DiamondSquareGenerator.h"
 #include "ChunkCoord.h"
-#include "DiamondSquareGenerator.h"
 #include "TerrainGeometry.h"
 
 // Bits into LoadedChunk::missingNeighborMask, one per cardinal direction.
