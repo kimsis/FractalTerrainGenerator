@@ -53,6 +53,17 @@ struct Geometry {
 GeometryData generateTerrainGeometry(const TerrainParams& params);
 
 /*!
+ *	Overwrites an already-allocated vertexBuffer's positions+normals regions in place (same layout
+ *	as createAndUploadIntoGpuMemory) — no GPU allocation happens here. `vertexBuffer` must already
+ *	be big enough to hold `geometry_data`'s positions+normals.
+ *
+ *	@param	vertexBuffer	An existing buffer, at least as large as this call will write into it.
+ *	@param	geometry_data	The CPU-side geometry to overwrite it with.
+ *	@return	The byte offset within vertexBuffer where normals were written.
+ */
+VkDeviceSize uploadVertexDataInPlace(VkBuffer vertexBuffer, const GeometryData& geometry_data);
+
+/*!
  * Based on the (already populated!) GeometryData, creates a single combined GPU buffer holding
  * positions+normals in host coherent GPU memory and uploads the data into it, returning a new
  * Geometry struct with a handle to that buffer. Ensure to free the memory by using
@@ -65,17 +76,6 @@ GeometryData generateTerrainGeometry(const TerrainParams& params);
  * @return	A new Geometry instance containing a handle to the newly created GPU buffer.
  */
 Geometry createAndUploadIntoGpuMemory(const GeometryData& geometry_data);
-
-/*!
- *	Overwrites an already-allocated vertexBuffer's positions+normals regions in place (same layout
- *	as createAndUploadIntoGpuMemory) — no GPU allocation happens here. `vertexBuffer` must already
- *	be big enough to hold `geometry_data`'s positions+normals.
- *
- *	@param	vertexBuffer	An existing buffer, at least as large as this call will write into it.
- *	@param	geometry_data	The CPU-side geometry to overwrite it with.
- *	@return	The byte offset within vertexBuffer where normals were written.
- */
-VkDeviceSize uploadVertexDataInPlace(VkBuffer vertexBuffer, const GeometryData& geometry_data);
 
 /*!
  *	Frees `geometry`'s vertex buffer, if it's non-null. A VK_NULL_HANDLE `vertexBuffer` is

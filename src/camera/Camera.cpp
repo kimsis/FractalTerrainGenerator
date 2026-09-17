@@ -26,13 +26,13 @@ float Camera::getPitch() const { return pitch; }
 
 float Camera::getSpeed() const { return speed; }
 
+void Camera::computeProjectionMatrix() {
+    projection_matrix = vklCreatePerspectiveProjectionMatrix(glm::radians(field_of_view), aspect_ratio, near_plane_distance, far_plane_distance);
+}
+
 void Camera::setAspectRatio(float ar) {
     aspect_ratio = ar;
     computeProjectionMatrix();
-}
-
-void Camera::computeProjectionMatrix() {
-    projection_matrix = vklCreatePerspectiveProjectionMatrix(glm::radians(field_of_view), aspect_ratio, near_plane_distance, far_plane_distance);
 }
 
 void Camera::setSpeed(float newSpeed) { speed = newSpeed; }

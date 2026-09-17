@@ -8,6 +8,10 @@
 
 #include <GLFW/glfw3.h>
 
+size_t chunksStillGenerating(const ChunkManager& chunkManager) {
+    return chunkManager.pendingChunks.size() + chunkManager.readyForNormals.size() + chunkManager.pendingNormals.size();
+}
+
 void buildLoadingGUI(size_t pendingChunkCount) {
     const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(main_viewport->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -18,10 +22,6 @@ void buildLoadingGUI(size_t pendingChunkCount) {
     );
     ImGui::Text("Generating terrain... (%zu chunks remaining)", pendingChunkCount);
     ImGui::End();
-}
-
-size_t chunksStillGenerating(const ChunkManager& chunkManager) {
-    return chunkManager.pendingChunks.size() + chunkManager.readyForNormals.size() + chunkManager.pendingNormals.size();
 }
 
 void generateTerrainGeometryWithLoadingScreen(VkDevice vk_device, ChunkManager& chunkManager, const glm::vec3& cameraPos) {

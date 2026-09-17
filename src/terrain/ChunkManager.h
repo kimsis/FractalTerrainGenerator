@@ -50,19 +50,6 @@ struct PendingDestroy {
 };
 
 /*!
- *	Creates and uploads an index buffer. Called exactly once for the whole ChunkManager.
- *
- *	@param	indices	The triangle index data to upload. Must not be empty.
- *	@return	A handle to the newly created, uploaded index buffer.
- */
-VkBuffer createAndUploadIndexBuffer(const std::vector<uint32_t>& indices);
-
-/*!
- *	Kicks off terrain generation for the given params on a background thread.
- */
-std::future<GeometryData> startTerrainGeneration(const TerrainParams& params);
-
-/*!
  *	Owns the set of terrain chunks currently loaded around the camera, generating new ones on
  *	demand and discarding distant ones. Generation is split into two background-threaded phases:
  *	phase 1 (pendingChunks) computes a chunk's heights/positions/indices independently per chunk,
@@ -114,6 +101,19 @@ struct ChunkManager {
     // Geometry evicted, not yet actually freed. See PendingDestroy.
     std::vector<PendingDestroy> pendingDestroys;
 };
+
+/*!
+ *	Kicks off terrain generation for the given params on a background thread.
+ */
+std::future<GeometryData> startTerrainGeneration(const TerrainParams& params);
+
+/*!
+ *	Creates and uploads an index buffer. Called exactly once for the whole ChunkManager.
+ *
+ *	@param	indices	The triangle index data to upload. Must not be empty.
+ *	@return	A handle to the newly created, uploaded index buffer.
+ */
+VkBuffer createAndUploadIndexBuffer(const std::vector<uint32_t>& indices);
 
 /*!
  *	Call once per frame: advances chunk generation/upload/destroy around the camera, evicting

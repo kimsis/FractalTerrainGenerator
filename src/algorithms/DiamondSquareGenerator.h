@@ -33,18 +33,21 @@ class DiamondSquareGenerator {
 
    public:
     DiamondSquareGenerator(const TerrainParams& newParams = TerrainParams());
-    void SetParams(const TerrainParams& newParams);
-    const TerrainParams& GetParams() const;
-    const std::vector<uint32_t>& getIndices() const;
-    const std::vector<glm::vec3>& getPositions() const;
+
     const int getWorldGridX(int x) const;
     const int getWorldGridY(int y) const;
     void GenerateIndices();
+    const std::vector<glm::vec3>& getPositions() const;
+    const std::vector<uint32_t>& getIndices() const;
+    const TerrainParams& GetParams() const;
+
     void GenerateHeightMap();
     void GeneratePositions();
 
     // Computes heights + positions + indices only — no normals.
     void ComputeTerrain();
+
+    void SetParams(const TerrainParams& newParams);
 
     ~DiamondSquareGenerator();
 };

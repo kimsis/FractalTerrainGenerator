@@ -30,10 +30,10 @@ class Camera {
     float getPitch() const;
     float getSpeed() const;
 
+    void computeProjectionMatrix();
+
     /*! Change the aspect ratio when the window is resized */
     void setAspectRatio(float aspect_ratio);
-
-    void computeProjectionMatrix();
 
     /*! Change the speed at which the camera moves */
     void setSpeed(float newSpeed);
@@ -120,8 +120,6 @@ class FlyCamera : public Camera {
      *  across. */
     explicit FlyCamera(const Camera& fromCamera);
 
-    glm::mat4 getViewMatrix() const override;
-
     /*! The direction the camera is currently facing. */
     glm::vec3 getForward() const override;
 
@@ -135,4 +133,6 @@ class FlyCamera : public Camera {
     /*! Moves straight along world `up`, not the camera-relative up used elsewhere. */
     void moveUp(float dt);
     void moveDown(float dt);
+
+    glm::mat4 getViewMatrix() const override;
 };

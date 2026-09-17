@@ -4,24 +4,6 @@
 
 #include "../utils/MathUtils.h"
 
-DiamondSquareGenerator::DiamondSquareGenerator(const TerrainParams& newParams) {
-    // Guard: guarantees SetParams sees this as a size change, so it generates indices itself.
-    params.gridSizeExponent = -1;
-    SetParams(newParams);
-}
-
-void DiamondSquareGenerator::SetParams(const TerrainParams& newParams) {
-    bool sizeChanged = newParams.gridSizeExponent != params.gridSizeExponent;
-    params = newParams;
-    ComputeTerrain();
-    if (sizeChanged) GenerateIndices();
-}
-const TerrainParams& DiamondSquareGenerator::GetParams() const { return params; };
-const std::vector<uint32_t>& DiamondSquareGenerator::getIndices() const { return indices; };
-const std::vector<glm::vec3>& DiamondSquareGenerator::getPositions() const { return positions; };
-const int DiamondSquareGenerator::getWorldGridX(int x) const { return params.chunkX * (size - 1) + x; };
-const int DiamondSquareGenerator::getWorldGridY(int y) const { return params.chunkY * (size - 1) + y; };
-
 ChunkCoord cameraToChunkCoord(const glm::vec3& pos, const TerrainParams& params) {
     int size = (1 << params.gridSizeExponent) + 1;
     float globalGridX = pos.x / params.spacing + size / 2.0f;
@@ -30,6 +12,15 @@ ChunkCoord cameraToChunkCoord(const glm::vec3& pos, const TerrainParams& params)
     int cy = static_cast<int>(std::floor(globalGridY / (size - 1)));
     return ChunkCoord{cx, cy};
 }
+
+DiamondSquareGenerator::DiamondSquareGenerator(const TerrainParams& newParams) {
+    // Guard: guarantees SetParams sees this as a size change, so it generates indices itself.
+    params.gridSizeExponent = -1;
+    SetParams(newParams);
+}
+
+const int DiamondSquareGenerator::getWorldGridX(int x) const { return params.chunkX * (size - 1) + x; };
+const int DiamondSquareGenerator::getWorldGridY(int y) const { return params.chunkY * (size - 1) + y; };
 
 void DiamondSquareGenerator::GenerateIndices() {
     indices.resize((size - 1) * (size - 1) * 6);
@@ -51,6 +42,10 @@ void DiamondSquareGenerator::GenerateIndices() {
         }
     }
 }
+
+const std::vector<glm::vec3>& DiamondSquareGenerator::getPositions() const { return positions; };
+const std::vector<uint32_t>& DiamondSquareGenerator::getIndices() const { return indices; };
+const TerrainParams& DiamondSquareGenerator::GetParams() const { return params; };
 
 void DiamondSquareGenerator::GenerateHeightMap() {
     heights.resize(size * size);
@@ -127,6 +122,15 @@ void DiamondSquareGenerator::ComputeTerrain() {
     GeneratePositions();
 }
 
+void DiamondSquareGenerator::SetParams(const TerrainParams& newParams) {
+    bool sizeChanged = newParams.gridSizeExponent != params.gridSizeExponent;
+    params = newParams;
+    ComputeTerrain();
+    if (sizeChanged) GenerateIndices();
+}
+
+DiamondSquareGenerator::~DiamondSquareGenerator() {}
+
 std::vector<glm::vec3> deriveTerrainNormals(
     const std::vector<glm::vec3>& positions,
     int size,
@@ -162,5 +166,3 @@ std::vector<glm::vec3> deriveTerrainNormals(
     }
     return normals;
 }
-
-DiamondSquareGenerator::~DiamondSquareGenerator() {}

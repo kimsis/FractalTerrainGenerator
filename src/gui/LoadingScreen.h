@@ -8,18 +8,18 @@
 #include "../terrain/ChunkManager.h"
 
 /*!
- *	Builds a minimal ImGui panel shown while the initial chunks are generating, before the real
- *	terrain scene's own controls exist yet.
- *	@param	pendingChunkCount	How many chunks are still pending, shown in the panel's text.
- */
-void buildLoadingGUI(size_t pendingChunkCount);
-
-/*!
  *	How many chunks chunkManager still has to generate/upload before it's fully caught up.
  *	@param	chunkManager	The chunk manager to query.
  *	@return		The number of chunks still pending generation, normal-computation, or upload.
  */
 size_t chunksStillGenerating(const ChunkManager& chunkManager);
+
+/*!
+ *	Builds a minimal ImGui panel shown while the initial chunks are generating, before the real
+ *	terrain scene's own controls exist yet.
+ *	@param	pendingChunkCount	How many chunks are still pending, shown in the panel's text.
+ */
+void buildLoadingGUI(size_t pendingChunkCount);
 
 /*!
  *	Blocks until every chunk in the initial (2 * viewRadius + 1)^2 window around cameraPos has been
