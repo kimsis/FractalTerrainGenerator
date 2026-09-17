@@ -205,6 +205,37 @@ struct WaterScene {
 };
 
 /*!
+ *	Everything loadSettings() reads out of settings.ini that main() still needs afterward — plain
+ *	one-time startup values, as opposed to the many settings.ini-backed globals (g_camera_speed,
+ *	g_terrain_ka, ...) that loadSettings() writes directly since nothing outside their own subsystem
+ *	ever needs them passed around.
+ */
+struct AppSettings {
+    int window_width;
+    int window_height;
+    std::string window_title;
+
+    float field_of_view;
+    float near_plane_distance;
+    float far_plane_distance;
+    glm::vec3 camera_position;
+    float camera_yaw;
+    float camera_pitch;
+
+    bool depthtest;
+    float background_r;
+    float background_g;
+    float background_b;
+
+    float initial_hurst;
+    uint32_t initial_seed;
+    int initial_grid_size_exponent;
+    float initial_height_scale;
+    float initial_roughness;
+    float initial_water_level;
+};
+
+/*!
  *	Everything recreateSwapchainAndDependents needs that stays fixed for the whole render loop —
  *	built once before the loop starts. Kept separate from the Vulkan/camera objects it actually
  *	replaces (vk_swapchain, depth_buffer, ...), which are passed as mutable references instead since
@@ -227,6 +258,13 @@ struct SwapchainRecreateContext {
 /* --------------------------------------------- */
 // Helper Function Declarations
 /* --------------------------------------------- */
+/*!
+ *	Reads every startup default out of assets/settings/settings.ini: window/camera/renderer's
+ *	one-time setup values (returned in an AppSettings) and the GUI sliders'/ChunkManager's/demo
+ *	mode's starting values (written directly into their respective globals — see AppSettings).
+ */
+AppSettings loadSettings();
+
 /*!
  *	This callback function gets invoked by GLFW whenever a GLFW error occured.
  */
@@ -615,38 +653,28 @@ static bool g_synchronization2_supported = false;
  */
 PFN_vkCmdPipelineBarrier2KHR g_vkCmdPipelineBarrier2KHR;
 
-/* ------------------------------------------------ */
-// Main
-/* ------------------------------------------------ */
-
-int main() {
-    VKL_LOG(WELCOME_MSG);
-
-    /* --------------------------------------------- */
-    // Load Settings From File
-    /* --------------------------------------------- */
-
+AppSettings loadSettings() {
     // Every startup default lives in one file now — one-time settings (window/camera/renderer)
     // and GUI sliders' starting values (terrain/chunks) alike.
     INIReader settings_reader("assets/settings/settings.ini");
 
-    int window_width = 800;
-    int window_height = 800;
-    std::string window_title = settings_reader.Get("window", "title", WINDOW_TITLE);
+    AppSettings settings{};
+    settings.window_width = 800;
+    settings.window_height = 800;
+    settings.window_title = settings_reader.Get("window", "title", WINDOW_TITLE);
 
-    float field_of_view = static_cast<float>(settings_reader.GetReal("camera", "fov", 60.0f));
-    float near_plane_distance = static_cast<float>(settings_reader.GetReal("camera", "near", 0.1f));
-    float far_plane_distance = static_cast<float>(settings_reader.GetReal("camera", "far", 100.0f));
-    float aspect_ratio = static_cast<float>(window_width) / static_cast<float>(window_height);
-    glm::vec3 camera_position(
+    settings.field_of_view = static_cast<float>(settings_reader.GetReal("camera", "fov", 60.0f));
+    settings.near_plane_distance = static_cast<float>(settings_reader.GetReal("camera", "near", 0.1f));
+    settings.far_plane_distance = static_cast<float>(settings_reader.GetReal("camera", "far", 100.0f));
+    settings.camera_position = glm::vec3(
         static_cast<float>(settings_reader.GetReal("camera", "position_x", 0.0f)),
         static_cast<float>(settings_reader.GetReal("camera", "position_y", 0.0f)),
         static_cast<float>(settings_reader.GetReal("camera", "position_z", 0.0f))
     );
     // Same convention as the live fly-camera controls: yaw/pitch = 0 looks along +X; positive
     // pitch looks up, negative looks down.
-    float camera_yaw = static_cast<float>(settings_reader.GetReal("camera", "yaw", 0.0f));
-    float camera_pitch = static_cast<float>(settings_reader.GetReal("camera", "pitch", 0.0f));
+    settings.camera_yaw = static_cast<float>(settings_reader.GetReal("camera", "yaw", 0.0f));
+    settings.camera_pitch = static_cast<float>(settings_reader.GetReal("camera", "pitch", 0.0f));
 
     bool as_wireframe = settings_reader.GetBoolean("renderer", "wireframe", false);
     if (as_wireframe) {
@@ -657,19 +685,19 @@ int main() {
         g_culling_index = 1;
     }
     g_draw_normals = settings_reader.GetBoolean("renderer", "normals", false);
-    bool depthtest = settings_reader.GetBoolean("renderer", "depthtest", true);
-    float background_r = static_cast<float>(settings_reader.GetReal("renderer", "background_r", 0.14));
-    float background_g = static_cast<float>(settings_reader.GetReal("renderer", "background_g", 0.4));
-    float background_b = static_cast<float>(settings_reader.GetReal("renderer", "background_b", 0.37));
+    settings.depthtest = settings_reader.GetBoolean("renderer", "depthtest", true);
+    settings.background_r = static_cast<float>(settings_reader.GetReal("renderer", "background_r", 0.14));
+    settings.background_g = static_cast<float>(settings_reader.GetReal("renderer", "background_g", 0.4));
+    settings.background_b = static_cast<float>(settings_reader.GetReal("renderer", "background_b", 0.37));
 
     // Initial values for the "Terrain Controls" GUI sliders — every one of them stays live-
     // adjustable from the GUI afterward, this only affects what they start at.
-    float initial_hurst = static_cast<float>(settings_reader.GetReal("terrain", "hurst", 0.8));
-    uint32_t initial_seed = static_cast<uint32_t>(settings_reader.GetInteger("terrain", "seed", 1337));
-    int initial_grid_size_exponent = static_cast<int>(settings_reader.GetInteger("terrain", "grid_size_exponent", 4));
-    float initial_height_scale = static_cast<float>(settings_reader.GetReal("terrain", "height_scale", 1.0));
-    float initial_roughness = static_cast<float>(settings_reader.GetReal("terrain", "roughness", 0.6));
-    float initial_water_level = static_cast<float>(settings_reader.GetReal("terrain", "water_level", 2.0));
+    settings.initial_hurst = static_cast<float>(settings_reader.GetReal("terrain", "hurst", 0.8));
+    settings.initial_seed = static_cast<uint32_t>(settings_reader.GetInteger("terrain", "seed", 1337));
+    settings.initial_grid_size_exponent = static_cast<int>(settings_reader.GetInteger("terrain", "grid_size_exponent", 4));
+    settings.initial_height_scale = static_cast<float>(settings_reader.GetReal("terrain", "height_scale", 1.0));
+    settings.initial_roughness = static_cast<float>(settings_reader.GetReal("terrain", "roughness", 0.6));
+    settings.initial_water_level = static_cast<float>(settings_reader.GetReal("terrain", "water_level", 2.0));
     g_camera_speed = static_cast<float>(settings_reader.GetReal("camera", "speed", 5.0));
     g_chunk_view_radius = static_cast<int>(settings_reader.GetInteger("chunks", "view_radius", 16));
     g_mouse_sensitivity = static_cast<float>(settings_reader.GetReal("camera", "mouse_sensitivity", 0.005));
@@ -702,6 +730,20 @@ int main() {
     g_demo_height_interp_duration = settings_reader.GetReal("demo", "height_interp_duration", 1.0);
     g_demo_water_interp_duration = settings_reader.GetReal("demo", "water_interp_duration", 1.0);
 
+    return settings;
+}
+
+/* ------------------------------------------------ */
+// Main
+/* ------------------------------------------------ */
+
+int main() {
+    VKL_LOG(WELCOME_MSG);
+
+    AppSettings settings = loadSettings();
+    int window_width = settings.window_width;
+    int window_height = settings.window_height;
+
     // Install a callback function, which gets invoked whenever a GLFW error occurred.
     glfwSetErrorCallback(errorCallbackFromGlfw);
 
@@ -722,7 +764,7 @@ int main() {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
     GLFWwindow* window = nullptr;
-    window = glfwCreateWindow(window_width, window_height, window_title.c_str(), nullptr, nullptr);
+    window = glfwCreateWindow(window_width, window_height, settings.window_title.c_str(), nullptr, nullptr);
 
     if (!window) {
         VKL_LOG("If your program reaches this point, that means two things:");
@@ -914,7 +956,7 @@ int main() {
             std::clamp(static_cast<uint32_t>(window_height), surface_capabilities.minImageExtent.height, surface_capabilities.maxImageExtent.height)
         );
     }
-    aspect_ratio = static_cast<float>(window_width) / static_cast<float>(window_height);
+    float aspect_ratio = static_cast<float>(window_width) / static_cast<float>(window_height);
     // Build the swapchain config struct:
     VkSwapchainCreateInfoKHR swapchain_create_info = {};
     swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -961,9 +1003,9 @@ int main() {
     // Create a camera helper object, positioned/oriented per camera_terrain.ini. The trackball
     // camera's target is derived by raycasting the configured position/direction against the
     // terrain, falling back to the origin if that ray doesn't hit the terrain (e.g. looking up).
-    FlyCamera flyCamera(field_of_view, aspect_ratio, near_plane_distance, far_plane_distance);
-    flyCamera.translate(camera_position);
-    flyCamera.rotate(glm::radians(camera_yaw), glm::radians(camera_pitch));
+    FlyCamera flyCamera(settings.field_of_view, aspect_ratio, settings.near_plane_distance, settings.far_plane_distance);
+    flyCamera.translate(settings.camera_position);
+    flyCamera.rotate(glm::radians(settings.camera_yaw), glm::radians(settings.camera_pitch));
     auto initial_hit = raycastTerrain(flyCamera.getPosition(), flyCamera.getForward());
     TrackballCamera trackballCamera(flyCamera, initial_hit.has_value() ? initial_hit->point : glm::vec3(0.0f, 0.0f, 0.0f));
     Camera* activeCamera = &trackballCamera;
@@ -992,9 +1034,9 @@ int main() {
     VklSwapchainConfig swapchain_config = {};
 
     VkClearValue color_clear_value;
-    color_clear_value.color.float32[0] = background_r;
-    color_clear_value.color.float32[1] = background_g;
-    color_clear_value.color.float32[2] = background_b;
+    color_clear_value.color.float32[0] = settings.background_r;
+    color_clear_value.color.float32[1] = settings.background_g;
+    color_clear_value.color.float32[2] = settings.background_b;
     color_clear_value.color.float32[3] = 1.0f;
 
     swapchain_config.swapchainHandle = vk_swapchain;
@@ -1005,7 +1047,7 @@ int main() {
         framebufferComposition.colorAttachmentImageDetails.imageFormat = swapchain_create_info.imageFormat;
         framebufferComposition.colorAttachmentImageDetails.imageUsage = swapchain_create_info.imageUsage;
         framebufferComposition.colorAttachmentImageDetails.clearValue = color_clear_value;
-        if (depthtest) {
+        if (settings.depthtest) {
             // If we also set the data of the depth buffer, our framebuffer will consist of two images:
             framebufferComposition.depthAttachmentImageDetails.imageHandle = depth_buffer;
             framebufferComposition.depthAttachmentImageDetails.imageFormat = VK_FORMAT_D32_SFLOAT;
@@ -1049,17 +1091,17 @@ int main() {
     // Set up the Scene
     /* --------------------------------------------- */
     TerrainParams initial_terrain_params;
-    initial_terrain_params.hurst = initial_hurst;
-    initial_terrain_params.seed = initial_seed;
-    initial_terrain_params.gridSizeExponent = initial_grid_size_exponent;
+    initial_terrain_params.hurst = settings.initial_hurst;
+    initial_terrain_params.seed = settings.initial_seed;
+    initial_terrain_params.gridSizeExponent = settings.initial_grid_size_exponent;
     TerrainScene terrain_scene = setupTerrainScene(
         vk_device,
         vk_queue,
         selected_queue_family_index,
         initial_terrain_params,
-        initial_height_scale,
-        initial_roughness,
-        initial_water_level
+        settings.initial_height_scale,
+        settings.initial_roughness,
+        settings.initial_water_level
     );
     generateTerrainGeometryWithLoadingScreen(vk_device, terrain_scene.chunkManager, activeCamera->getPosition());
 
@@ -1100,7 +1142,7 @@ int main() {
         selected_queue_family_index,
         vk_surface,
         surface_format,
-        depthtest,
+        settings.depthtest,
         color_clear_value,
         depth_clear_value
     };
