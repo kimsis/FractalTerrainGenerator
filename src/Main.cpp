@@ -27,7 +27,7 @@
 #include <vulkan/vulkan.hpp> // for vk::OutOfDateKHRError, thrown by the framework's internal vulkan-hpp calls on resize
 
 #include "algorithms/DiamondSquareGenerator.h"
-#include "Camera/Camera.h"
+#include "camera/Camera.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
