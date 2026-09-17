@@ -6,9 +6,7 @@
  * Vulkan edition created by Johannes Unterguggenberger (junt@cg.tuwien.ac.at).
  */
 // vulkan/vulkan.h must come before GLFW/glfw3.h and VulkanLaunchpad.h below — neither of those
-// headers includes it themselves, they just assume the includer already did. Keep this its own
-// include block (blank line on both sides) so an editor's "sort includes" doesn't merge it
-// alphabetically into the block below and reorder it after them again.
+// headers includes it themselves, they just assume the includer already did.
 #include <vulkan/vulkan.h>
 
 #include <GLFW/glfw3.h>
@@ -905,13 +903,10 @@ int main() {
     WaterScene water_scene = setupWaterScene(vk_device, initial_terrain_params);
     VKL_LOG("Water scene set up.");
 
-    // Callback function for handling mouse button events:
     glfwSetMouseButtonCallback(window, mouseButtonCallbackFromGlfw);
 
-    // Callback function for handling mouse scroll events:
     glfwSetScrollCallback(window, scrollCallbackFromGlfw);
 
-    // Callback function for handling window resize events:
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallbackFromGlfw);
 
     glfwSetKeyCallback(window, handleGlfwKeyCallback);
@@ -924,8 +919,7 @@ int main() {
 
     glfwSetWindowAttrib(window, GLFW_RESIZABLE, GLFW_TRUE);
 
-    // Everything recreateSwapchainAndDependents needs that stays fixed for the whole loop below —
-    // built once here instead of re-listed at each of its three call sites.
+    // Everything recreateSwapchainAndDependents needs that stays fixed for the whole loop below
     SwapchainRecreateContext swapchain_recreate_ctx{
         window,
         vk_instance,
@@ -977,7 +971,6 @@ int main() {
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        // ImGui::ShowDemoWindow();
         buildGUI(terrain_scene, activeCamera->getPosition(), activeCamera->getForward());
         ImGui::Render();
 
@@ -1036,7 +1029,6 @@ int main() {
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
-    VKL_LOG("Dear ImGui shut down.");
 
     vklDestroyFramework();
     vkDestroySwapchainKHR(vk_device, vk_swapchain, nullptr);
@@ -1055,8 +1047,6 @@ int main() {
 /* --------------------------------------------- */
 
 AppSettings loadSettings() {
-    // Every startup default lives in one file now — one-time settings (window/camera/renderer)
-    // and GUI sliders' starting values (terrain/chunks) alike.
     INIReader settings_reader("assets/settings/settings.ini");
 
     AppSettings settings{};
@@ -1091,8 +1081,7 @@ AppSettings loadSettings() {
     settings.background_g = static_cast<float>(settings_reader.GetReal("renderer", "background_g", 0.4));
     settings.background_b = static_cast<float>(settings_reader.GetReal("renderer", "background_b", 0.37));
 
-    // Initial values for the "Terrain Controls" GUI sliders — every one of them stays live-
-    // adjustable from the GUI afterward, this only affects what they start at.
+    // Initial values for the "Terrain Controls" GUI sliders
     settings.initial_hurst = static_cast<float>(settings_reader.GetReal("terrain", "hurst", 0.8));
     settings.initial_seed = static_cast<uint32_t>(settings_reader.GetInteger("terrain", "seed", 1337));
     settings.initial_grid_size_exponent = static_cast<int>(settings_reader.GetInteger("terrain", "grid_size_exponent", 4));
@@ -1139,13 +1128,11 @@ void errorCallbackFromGlfw(int error, const char* description) { std::cout << "G
 void addInstanceExtensionToVectorIfSupported(const char* extension_name, std::vector<const char*>& ref_vector) {
     VkResult result;
 
-    // Query how many instance extensions there are:
     uint32_t instance_extension_count;
     result = vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_count, nullptr);
     VKL_CHECK_VULKAN_ERROR(result);
     VKL_RETURN_ON_ERROR(result);
 
-    // Get all the instance extension names/properties there are:
     std::vector<VkExtensionProperties> available_instance_extensions(instance_extension_count);
     result = vkEnumerateInstanceExtensionProperties(nullptr, &instance_extension_count, available_instance_extensions.data());
     VKL_CHECK_VULKAN_ERROR(result);
@@ -1153,7 +1140,6 @@ void addInstanceExtensionToVectorIfSupported(const char* extension_name, std::ve
 
     for (const VkExtensionProperties& available_extension : available_instance_extensions) {
         if (strcmp(available_extension.extensionName, extension_name) == 0) {
-            // Found the extension => Add it to the vector:
             ref_vector.push_back(extension_name);
             return;
         }
@@ -1163,14 +1149,12 @@ void addInstanceExtensionToVectorIfSupported(const char* extension_name, std::ve
 std::vector<const char*> getRequiredInstanceExtensions() {
     std::vector<const char*> required_extensions;
 
-    // Query extensions which are required by GLFW, adding each one only if it is supported:
     uint32_t glfw_instance_extensions_count;
     const char** glfw_instance_extensions_names = glfwGetRequiredInstanceExtensions(&glfw_instance_extensions_count);
     for (uint32_t i = 0; i < glfw_instance_extensions_count; ++i) {
         addInstanceExtensionToVectorIfSupported(glfw_instance_extensions_names[i], required_extensions);
     }
 
-    // Query extensions which are required by Vulkan Launchpad, adding each one only if it is supported:
     uint32_t framework_instance_extensions_count;
     const char** framework_instance_extensions_names = vklGetRequiredInstanceExtensions(&framework_instance_extensions_count);
     for (uint32_t i = 0; i < framework_instance_extensions_count; ++i) {
@@ -1186,13 +1170,11 @@ std::vector<const char*> getRequiredInstanceExtensions() {
 void addValidationLayerNameToVectorIfSupported(const char* validation_layer_name, std::vector<const char*>& ref_vector) {
     VkResult result;
 
-    // Query how many validation layers there are:
     uint32_t layer_count;
     result = vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
     VKL_CHECK_VULKAN_ERROR(result);
     VKL_RETURN_ON_ERROR(result);
 
-    // Get all the validation layer names/properties there are:
     std::vector<VkLayerProperties> available_layers(layer_count);
     result = vkEnumerateInstanceLayerProperties(&layer_count, available_layers.data());
     VKL_CHECK_VULKAN_ERROR(result);
@@ -1208,22 +1190,21 @@ void addValidationLayerNameToVectorIfSupported(const char* validation_layer_name
 }
 
 VkInstance createVulkanInstance() {
-    VkApplicationInfo application_info = {};                     // Zero-initialize every member
-    application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO; // Set this struct instance's type
+    VkApplicationInfo application_info = {};
+    application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     application_info.pEngineName = "Kimsis_Engine_Terrain_generator";
     application_info.engineVersion = VK_MAKE_API_VERSION(0, 2023, 9, 1);
     application_info.pApplicationName = "Kimsis_Engine_Terrain";
     application_info.applicationVersion = VK_MAKE_API_VERSION(0, 2023, 9, 19);
-    application_info.apiVersion = VK_API_VERSION_1_1; // Your system needs to support this Vulkan API version.
+    application_info.apiVersion = VK_API_VERSION_1_1;
 
-    VkInstanceCreateInfo instance_create_info = {};                      // Zero-initialize every member
-    instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO; // Set the struct's type
+    VkInstanceCreateInfo instance_create_info = {};
+    instance_create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instance_create_info.pApplicationInfo = &application_info;
 
     // A vector to hold all our requested instance extensions:
     std::vector<const char*> instance_extensions = getRequiredInstanceExtensions();
 
-    // Set info in the VkInstanceCreateInfo struct:
     instance_create_info.enabledExtensionCount = instance_extensions.size();
     instance_create_info.ppEnabledExtensionNames = instance_extensions.data();
 
@@ -1365,13 +1346,11 @@ VkDeviceQueueCreateInfo createQueueCreateInfo(VkPhysicalDevice vk_physical_devic
 void addDeviceExtensionToVectorIfSupported(const char* extension_name, VkPhysicalDevice physical_device, std::vector<const char*>& ref_vector) {
     VkResult result;
 
-    // Query how many device extensions there are:
     uint32_t extensions_count;
     result = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extensions_count, nullptr);
     VKL_CHECK_VULKAN_ERROR(result);
     VKL_RETURN_ON_ERROR(result);
 
-    // Get all the device extensions:
     std::vector<VkExtensionProperties> available_extensions(extensions_count);
     result = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &extensions_count, available_extensions.data());
     VKL_CHECK_VULKAN_ERROR(result);
@@ -1379,7 +1358,6 @@ void addDeviceExtensionToVectorIfSupported(const char* extension_name, VkPhysica
 
     for (const VkExtensionProperties& available_extension : available_extensions) {
         if (strcmp(available_extension.extensionName, extension_name) == 0) {
-            // Found the extension => Add it to the vector:
             ref_vector.push_back(extension_name);
             return;
         }
